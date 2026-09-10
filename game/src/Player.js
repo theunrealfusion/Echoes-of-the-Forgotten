@@ -81,6 +81,7 @@ export class Player {
 
     // ── Mobile touch state ────────────────────────────────────────────────────
     this._joystickActive = false;
+    this._joyTouchId     = null;
     this._joystickCenter = { x: 0, y: 0 };
     this._joystickDelta  = { x: 0, y: 0 };
     this._lookTouchId    = null;
@@ -279,10 +280,12 @@ export class Player {
     joystickEl.addEventListener('touchstart', this._onJoyStart, { passive: false });
     joystickEl.addEventListener('touchmove',  this._onJoyMove,  { passive: false });
     joystickEl.addEventListener('touchend',   this._onJoyEnd,   { passive: false });
+    joystickEl.addEventListener('touchcancel',this._onJoyEnd,   { passive: false });
 
     lookPadEl.addEventListener('touchstart', this._onLookStart, { passive: false });
     lookPadEl.addEventListener('touchmove',  this._onLookMove,  { passive: false });
     lookPadEl.addEventListener('touchend',   this._onLookEnd,   { passive: false });
+    lookPadEl.addEventListener('touchcancel',this._onLookEnd,   { passive: false });
   }
 
   _removeMobileEvents() {
@@ -293,7 +296,9 @@ export class Player {
   /** @param {TouchEvent} e @private */
   _joyStart(e) {
     e.preventDefault();
+    if (this._joyTouchId !== null) return;
     const t = e.changedTouches[0];
+    this._joyTouchId = t.identifier;
     this._joystickActive = true;
     this._joystickCenter = { x: t.clientX, y: t.clientY };
     this._joystickDelta  = { x: 0, y: 0 };
@@ -302,31 +307,42 @@ export class Player {
   /** @param {TouchEvent} e @private */
   _joyMove(e) {
     e.preventDefault();
-    if (!this._joystickActive) return;
-    const t  = e.changedTouches[0];
-    const dx = t.clientX - this._joystickCenter.x;
-    const dy = t.clientY - this._joystickCenter.y;
-    const len = Math.sqrt(dx*dx + dy*dy);
-    const clamped = Math.min(len, JOY_RADIUS);
-    const angle   = Math.atan2(dy, dx);
+    if (!this._joystickActive || this._joyTouchId === null) return;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      if (t.identifier !== this._joyTouchId) continue;
+      const dx = t.clientX - this._joystickCenter.x;
+      const dy = t.clientY - this._joystickCenter.y;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      const clamped = Math.min(len, JOY_RADIUS);
+      const angle   = Math.atan2(dy, dx);
 
-    this._joystickDelta.x = (Math.cos(angle) * clamped) / JOY_RADIUS;
-    this._joystickDelta.y = (Math.sin(angle) * clamped) / JOY_RADIUS;
+      this._joystickDelta.x = (Math.cos(angle) * clamped) / JOY_RADIUS;
+      this._joystickDelta.y = (Math.sin(angle) * clamped) / JOY_RADIUS;
 
-    // Visually move the knob
-    const knob = document.getElementById('joystick-knob');
-    if (knob) {
-      knob.style.transform = `translate(${Math.cos(angle)*clamped}px, ${Math.sin(angle)*clamped}px)`;
+      // Visually move the knob
+      const knob = document.getElementById('joystick-knob');
+      if (knob) {
+        knob.style.transform = `translate(${Math.cos(angle) * clamped}px, ${Math.sin(angle) * clamped}px)`;
+      }
+      break;
     }
   }
 
   /** @param {TouchEvent} e @private */
   _joyEnd(e) {
     e.preventDefault();
-    this._joystickActive = false;
-    this._joystickDelta  = { x: 0, y: 0 };
-    const knob = document.getElementById('joystick-knob');
-    if (knob) knob.style.transform = 'translate(0,0)';
+    if (this._joyTouchId === null) return;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      if (t.identifier !== this._joyTouchId) continue;
+      this._joystickActive = false;
+      this._joyTouchId = null;
+      this._joystickDelta  = { x: 0, y: 0 };
+      const knob = document.getElementById('joystick-knob');
+      if (knob) knob.style.transform = 'translate(0,0)';
+      break;
+    }
   }
 
   // Look-pad handlers
@@ -358,6 +374,11 @@ export class Player {
   /** @param {TouchEvent} e @private */
   _lookEnd(e) {
     e.preventDefault();
-    this._lookTouchId = null;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      if (e.changedTouches[i].identifier === this._lookTouchId) {
+        this._lookTouchId = null;
+        break;
+      }
+    }
   }
 }

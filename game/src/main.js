@@ -19,6 +19,7 @@ import { EffectComposer }   from 'three/addons/postprocessing/EffectComposer.js'
 import { RenderPass }       from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass }  from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass }       from 'three/addons/postprocessing/OutputPass.js';
+import { VRButton }         from 'three/addons/webxr/VRButton.js';
 
 import { World }              from './World.js';
 import { Player }             from './Player.js';
@@ -62,11 +63,20 @@ class GameEngine {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.shadowMap.enabled  = true;
-    this.renderer.shadowMap.type     = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.enabled  = false; // Optimized: no shadow maps needed in void, reduces CPU overhead
     this.renderer.toneMapping        = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.2;
     this.renderer.outputColorSpace   = THREE.SRGBColorSpace;
+    this.renderer.xr.enabled         = true; // WebXR & PICO VR support
+
+    // WebXR session lifecycle listeners
+    this.renderer.xr.addEventListener('sessionstart', () => {
+      console.log('[WebXR] Session started');
+      this.audio.unlock();
+    });
+    this.renderer.xr.addEventListener('sessionend', () => {
+      console.log('[WebXR] Session ended');
+    });
 
     // ── Scene ─────────────────────────────────────────────────────────────────
     this.scene = new THREE.Scene();
@@ -87,11 +97,21 @@ class GameEngine {
     this._initComposer();
 
     // ── Sub-systems (constructed but NOT yet initialised) ─────────────────────
-    this.world       = new World(this.scene, '../assets/manifest.json');
+    this.world       = new World(this.scene, '../assets/manifests/zones.json');
     this.player      = new Player(this.camera, this.renderer.domElement);
     this.echoSystem  = new EchoSystem(this.scene, this.camera, this.world);
     this.restoration = new RestorationSystem(this.scene);
     this.audio       = new AudioSystem();
+
+    // ── WebXR VRButton ────────────────────────────────────────────────────────
+    const vrBtn = VRButton.createButton(this.renderer);
+    vrBtn.id = 'VRButton';
+    vrBtn.addEventListener('click', () => this.audio.unlock(), { passive: true });
+    document.body.appendChild(vrBtn);
+
+    // Canvas click unlocks audio context
+    canvas.addEventListener('click', () => this.audio.unlock(), { passive: true });
+    canvas.addEventListener('pointerdown', () => this.audio.unlock(), { passive: true });
 
     // ── State ─────────────────────────────────────────────────────────────────
     this.currentZoneId   = 'sunken_library';
@@ -107,12 +127,15 @@ class GameEngine {
   /**
    * Creates an EffectComposer with:
    *   1. RenderPass  — scene render
-   *   2. UnrealBloomPass — atmospheric void glow (purple bloom)
+   *   2. UnrealBloomPass — atmospheric void glow (purple bloom, 0.5x res for 60fps)
    *   3. OutputPass  — gamma-correct final output
    * @private
    */
   _initComposer() {
-    const size = new THREE.Vector2(window.innerWidth, window.innerHeight);
+    const size = new THREE.Vector2(
+      Math.floor(window.innerWidth / 2),
+      Math.floor(window.innerHeight / 2),
+    );
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
@@ -130,8 +153,8 @@ class GameEngine {
   // ── Initialisation ────────────────────────────────────────────────────────
 
   /**
-   * Async initialisation: wires all systems, loads the first zone, then
-   * dismisses the loading screen and starts the render loop.
+   * Async initialisation: wires all systems, loads all 5 zones, then
+   * dismisses the loading screen and starts the WebXR animation loop.
    */
   async init() {
     try {
@@ -140,12 +163,14 @@ class GameEngine {
 
       this._setLoadingProgress(0.25, 'Building the void…');
       this.world.createVoidEnvironment();
+      await this.world.loadManifest();
 
-      this._setLoadingProgress(0.45, 'Loading first zone…');
-      await this.world.loadZone(this.currentZoneId);
+      this._setLoadingProgress(0.45, 'Materialising civilizations…');
+      await this.world.loadAllZones();
 
       this._setLoadingProgress(0.65, 'Placing echoes…');
       const zoneData = this.world.getZoneData(this.currentZoneId);
+      this.player.setZoneBounds(new THREE.Vector3(...zoneData.position), zoneData.radius);
       this.echoSystem.initZone(this.currentZoneId, zoneData);
 
       this._setLoadingProgress(0.80, 'Calibrating restoration matrix…');
@@ -163,10 +188,13 @@ class GameEngine {
 
       this.isRunning = true;
       this.clock.start();
-      requestAnimationFrame(this._boundRender);
+      this.renderer.setAnimationLoop(this._boundRender);
 
       // Wire "Continue Exploring" button
-      restoreContinue.addEventListener('click', () => this._hideRestorationMessage());
+      restoreContinue.addEventListener('click', () => {
+        this.audio.unlock();
+        this._hideRestorationMessage();
+      });
     } catch (err) {
       console.error('[GameEngine] Initialisation failed:', err);
       this._showError(err);
@@ -181,6 +209,10 @@ class GameEngine {
    */
   update(delta) {
     const dt = Math.min(delta, 0.1);        // cap to avoid spiral-of-death
+
+    // Animate procedural shader uniforms & restoration particles
+    this.world.tick(this.clock.getElapsedTime());
+    this.restoration.tick(dt);
 
     this.player.update(dt);
     const playerPos = this.player.getPosition();
@@ -213,16 +245,23 @@ class GameEngine {
   // ── Render loop ───────────────────────────────────────────────────────────
 
   /**
-   * The main rAF loop. Calls update() then renders via the post-process composer.
+   * Primary frame callback invoked by renderer.setAnimationLoop.
+   * Updates systems and renders via EffectComposer or direct WebXR presenter.
+   * @param {number} [time]
+   * @param {XRFrame} [frame]
    * @private
    */
-  _loop() {
+  _loop(time, frame) {
     if (!this.isRunning) return;
-    requestAnimationFrame(this._boundRender);
 
     const delta = this.clock.getDelta();
     this.update(delta);
-    this.composer.render();
+
+    if (this.renderer.xr.isPresenting) {
+      this.renderer.render(this.scene, this.camera);
+    } else {
+      this.composer.render();
+    }
   }
 
   // ── Resize handler ────────────────────────────────────────────────────────
@@ -239,7 +278,7 @@ class GameEngine {
 
     this.renderer.setSize(w, h);
     this.composer.setSize(w, h);
-    this.bloomPass.resolution.set(w, h);
+    this.bloomPass.resolution.set(Math.floor(w / 2), Math.floor(h / 2));
   }
 
   // ── Zone restoration trigger ───────────────────────────────────────────────

@@ -1,0 +1,23 @@
+{
+  "sunken_library": [
+    "assets/concepts/sunken_library/main_hall_concept.png",
+    "assets/concepts/sunken_library/scroll_tower_concept.png",
+    "assets/concepts/sunken_library/knowledge_orb_concept.png"
+  ],
+  "sky_nomads": [
+    "assets/concepts/sky_nomads/cloud_palace_concept.png",
+    "assets/concepts/sky_nomads/wind_altar_concept.png"
+  ],
+  "deep_forge": [
+    "assets/concepts/deep_forge/forge_cathedral_concept.png",
+    "assets/concepts/deep_forge/great_anvil_concept.png"
+  ],
+  "memory_gardens": [
+    "assets/concepts/memory_gardens/spirit_temple_concept.png",
+    "assets/concepts/memory_gardens/memory_tree_concept.png"
+  ],
+  "grand_reunion": [
+    "assets/concepts/grand_reunion/unity_hall_concept.png",
+    "assets/concepts/grand_reunion/gift_monument_concept.png"
+  ]
+}

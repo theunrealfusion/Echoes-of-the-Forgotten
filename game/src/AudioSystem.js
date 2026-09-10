@@ -102,16 +102,13 @@ export class AudioSystem {
   // ── Init ──────────────────────────────────────────────────────────────────
 
   /**
-   * Creates the AudioContext. Must be called after a user gesture.
-   * Wrapped in try/catch for environments that block Web Audio.
+   * Creates the AudioContext without blocking on resume().
+   * Binds auto-unlock listeners for the first user interaction.
    * @returns {Promise<void>}
    */
   async init() {
     try {
       this.ctx = new (window.AudioContext || /** @type {any} */ (window.webkitAudioContext))();
-
-      // Resume context if suspended (autoplay policy)
-      if (this.ctx.state === 'suspended') await this.ctx.resume();
 
       // Master gain bus
       this._masterGain = makeGain(this.ctx, this.volume);
@@ -121,8 +118,46 @@ export class AudioSystem {
       this._buildRestoredAmbient();
 
       this._started = true;
+
+      // Unlock on first user gesture without blocking cold boot
+      this._setupUnlockListeners();
     } catch (err) {
       console.warn('[AudioSystem] Web Audio not available:', err);
+    }
+  }
+
+  /**
+   * Attaches one-time gesture listeners to resume AudioContext if suspended.
+   * @private
+   */
+  _setupUnlockListeners() {
+    const unlock = async () => {
+      await this.unlock();
+      if (this.ctx && this.ctx.state === 'running') {
+        window.removeEventListener('pointerdown', unlock);
+        window.removeEventListener('touchstart', unlock);
+        window.removeEventListener('click', unlock);
+        window.removeEventListener('keydown', unlock);
+      }
+    };
+    window.addEventListener('pointerdown', unlock, { passive: true });
+    window.addEventListener('touchstart', unlock, { passive: true });
+    window.addEventListener('click', unlock, { passive: true });
+    window.addEventListener('keydown', unlock, { passive: true });
+  }
+
+  /**
+   * Explicitly attempts to resume the AudioContext on user interaction.
+   * @returns {Promise<void>}
+   */
+  async unlock() {
+    if (!this.ctx) return;
+    if (this.ctx.state === 'suspended') {
+      try {
+        await this.ctx.resume();
+      } catch (err) {
+        console.warn('[AudioSystem] AudioContext resume error:', err);
+      }
     }
   }
 

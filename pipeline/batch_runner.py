@@ -38,6 +38,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -69,8 +70,27 @@ try:
 except ImportError:
     _HAS_RICH = False
 
-from .asset_generator import CIVILIZATION_STYLES, ForgottenCityAssetGenerator
-from .tripo_client import TripoAPIError, TripoClient, TripoTimeoutError
+# Ensure repo root is on sys.path for direct script execution
+_repo_root = Path(__file__).resolve().parent.parent
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
+
+try:
+    from pipeline.asset_generator import (
+        CIVILIZATION_ASSETS,
+        CIVILIZATION_STYLES,
+        ForgottenCityAssetGenerator,
+        get_all_prompts,
+    )
+    from pipeline.tripo_client import TripoAPIError, TripoClient, TripoTimeoutError
+except ImportError:
+    from asset_generator import (
+        CIVILIZATION_ASSETS,
+        CIVILIZATION_STYLES,
+        ForgottenCityAssetGenerator,
+        get_all_prompts,
+    )
+    from tripo_client import TripoAPIError, TripoClient, TripoTimeoutError
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -403,6 +423,195 @@ async def cmd_generate_all(api_key: str, output_dir: str, max_workers: int = 2) 
 # CLI argument parsing
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Dry-run execution & Prompt Validation
+# ---------------------------------------------------------------------------
+
+def validate_prompt(prompt: str, asset_type: str = "") -> tuple[bool, list[str]]:
+    """Validate 3D generation prompt against geometric, isolation, and scale constraints.
+
+    Args:
+        prompt: Generation prompt text.
+        asset_type: Core category (e.g., main_building, artifact, vegetation).
+
+    Returns:
+        Tuple of (is_valid: bool, issues: list[str]).
+    """
+    issues: list[str] = []
+    if not prompt or not isinstance(prompt, str) or not prompt.strip():
+        return False, ["Prompt is empty or contains only whitespace"]
+
+    p_clean = prompt.strip()
+    p_len = len(p_clean)
+
+    # 1. Character length boundaries (100 <= len <= 600)
+    if p_len < 100:
+        issues.append(
+            f"Prompt length ({p_len} chars) is below minimum threshold of 100 chars "
+            "(insufficient geometric specificity for Tripo V3)"
+        )
+    elif p_len > 600:
+        issues.append(
+            f"Prompt length ({p_len} chars) exceeds maximum threshold of 600 chars "
+            "(risks token truncation or prompt drift)"
+        )
+
+    p_lower = p_clean.lower()
+
+    # 2. Required isolation keywords
+    isolation_keywords = (
+        "isolated",
+        "game-ready",
+        "clean mesh",
+        "clean silhouette",
+        "single object",
+    )
+    if not any(kw in p_lower for kw in isolation_keywords):
+        issues.append(
+            "Missing required mesh isolation directive (must include one of: "
+            "'isolated', 'game-ready', 'clean mesh', 'clean silhouette', 'single object')"
+        )
+
+    # 3. Required PBR / texture directives
+    pbr_keywords = ("pbr", "textures", "normal", "material")
+    if not any(kw in p_lower for kw in pbr_keywords):
+        issues.append(
+            "Missing required PBR/texture directive (must include one of: "
+            "'PBR', 'textures', 'normal', 'material')"
+        )
+
+    # 4. Forbidden tokens: raw snake_case civilization identifiers
+    snake_case_matches = re.findall(
+        r"\b(?:sunken_library|sky_nomads|deep_forge|memory_gardens|grand_reunion)\b",
+        prompt,
+    )
+    if snake_case_matches:
+        unique_matches = list(set(snake_case_matches))
+        issues.append(
+            f"Contains forbidden raw snake_case identifier(s): {unique_matches} "
+            "(use natural language civilization titles instead)"
+        )
+
+    # 5. Scale bleed: small props cannot inherit monumental room-scale architectural terms
+    if asset_type.lower() in ("artifact", "vegetation"):
+        scale_bleed_terms = (
+            "cavern ceilings",
+            "tidal arches",
+            "sky-bridges",
+            "monumental",
+            "grand hall",
+            "palace",
+            "cathedral",
+            "spire",
+            "rotunda",
+        )
+        found_scale_bleed = [term for term in scale_bleed_terms if term in p_lower]
+        if found_scale_bleed:
+            issues.append(
+                f"Small prop ({asset_type}) contains scale-bleeding architectural term(s): {found_scale_bleed}"
+            )
+
+    # 6. Mesh contamination: atmospheric noise terms
+    atmospheric_terms = (
+        "god rays",
+        "light filtering",
+        "volumetric fog",
+        "volumetric light",
+    )
+    found_atmos = [term for term in atmospheric_terms if term in p_lower]
+    if found_atmos:
+        issues.append(
+            f"Contains mesh-contaminating atmospheric term(s): {found_atmos} "
+            "(causes non-manifold geometry or ground plane synthesis)"
+        )
+
+    return len(issues) == 0, issues
+
+
+def run_dry_run(zone_filter: Optional[str] = None) -> int:
+    """Validate all prompts and display detailed credit cost breakdown without API calls.
+
+    Args:
+        zone_filter: Optional civilization slug to filter output to one zone.
+
+    Returns:
+        Exit code: 0 if all prompts pass validation, 1 if any prompt fails.
+    """
+    _print("=" * 78)
+    _print("  TRIPO V3 PIPELINE — ASSET GENERATION DRY-RUN & PROMPT AUDIT")
+    _print("  Project: 'A Gift for the Forgotten City' (Tripothon S1)")
+    _print("=" * 78)
+    _print("Mode: SIMULATION / DRY-RUN (No API key required, 0 real credits consumed)")
+    _print("Unit Cost per Asset: 30c (Text-to-3D) + 20c (Quad Retopo) + 10c (PBR Bake) = 60 credits\n")
+
+    all_prompts = get_all_prompts()
+    selected_civs = [zone_filter] if zone_filter and zone_filter in all_prompts else list(all_prompts.keys())
+
+    total_assets_count = 0
+    total_credits_count = 0
+    failed_prompts: list[dict] = []
+
+    for civ_idx, civ_name in enumerate(selected_civs, 1):
+        civ_data = all_prompts[civ_name]
+        style_desc = CIVILIZATION_STYLES.get(civ_name, "")
+        _print("-" * 78)
+        _print(f"CIVILIZATION {civ_idx}/5: [{civ_name.upper()}]")
+        _print(f"Theme / Aesthetic: {style_desc[:110]}...")
+        _print("-" * 78)
+
+        civ_credits = 0
+        for asset_type, asset_info in civ_data.items():
+            total_assets_count += 1
+            name = asset_info.get("name", asset_type)
+            title = asset_info.get("title", name)
+            prompt = asset_info.get("prompt", "")
+            cost_info = asset_info.get("estimated_credits", {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60})
+            asset_total = cost_info.get("total", 60)
+            civ_credits += asset_total
+            total_credits_count += asset_total
+
+            is_valid, validation_errors = validate_prompt(prompt, asset_type=asset_type)
+
+            _print(f"  Asset #{total_assets_count:02d}: [{asset_type}] -> {name}.glb ('{title}')")
+            _print(f"    • Cost: {cost_info.get('text_to_3d', 30)}c Text-to-3D + {cost_info.get('retopology', 20)}c Retopo + {cost_info.get('pbr', 10)}c PBR = {asset_total} credits")
+            _print(f"    • Prompt: \"{prompt}\"")
+            if is_valid:
+                _print(f"    • Validation: [PASS] Length: {len(prompt)} chars, isolation & PBR directives verified\n")
+            else:
+                failed_prompts.append({
+                    "civ": civ_name,
+                    "asset_type": asset_type,
+                    "name": name,
+                    "issues": validation_errors,
+                })
+                _print(f"    • Validation: [FAIL] Length: {len(prompt)} chars | Issues:")
+                for err in validation_errors:
+                    _print(f"        - {err}")
+                _print("")
+
+        _print(f"  Subtotal for [{civ_name}]: {len(civ_data)} assets | {civ_credits} credits\n")
+
+    _print("=" * 78)
+    _print("DRY-RUN SUMMARY BREAKDOWN")
+    _print("=" * 78)
+    _print(f"  • Civilizations Processed : {len(selected_civs)} of 5")
+    _print(f"  • Total Game Assets       : {total_assets_count} assets")
+    _print("  • Pipeline Per Asset      : 30c (Text-to-3D) + 20c (Quad Retopo) + 10c (PBR Bake) = 60 credits")
+    _print(f"  • Total Estimated Credits : {total_credits_count:,} credits (${total_credits_count * 0.01:.2f} USD)")
+    if failed_prompts:
+        _print(f"  • Validation Status       : FAILED ({len(failed_prompts)} prompts failed validation) (Exit 1)")
+        _print("=" * 78)
+        return 1
+    else:
+        _print("  • Validation Status       : ALL PROMPTS VALIDATED (Exit 0)")
+        _print("=" * 78)
+        return 0
+
+
+# ---------------------------------------------------------------------------
+# CLI argument parsing
+# ---------------------------------------------------------------------------
+
 def _build_parser() -> argparse.ArgumentParser:
     """Build and return the top-level argument parser."""
     parser = argparse.ArgumentParser(
@@ -411,9 +620,10 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 examples:
-  python -m pipeline.batch_runner test-connection
-  python -m pipeline.batch_runner generate-civ --civ sky_nomads
-  python -m pipeline.batch_runner generate-all --output-dir assets/models
+  python pipeline/batch_runner.py --dry-run
+  python pipeline/batch_runner.py test-connection
+  python pipeline/batch_runner.py generate-civ --civ sky_nomads
+  python pipeline/batch_runner.py generate-all --output-dir assets/models
         """,
     )
     parser.add_argument(
@@ -427,8 +637,25 @@ examples:
         metavar="DIR",
         help="Root directory for generated model files (default: assets/models).",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate all 25 asset prompts and print credit cost estimates without calling the API.",
+    )
 
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command", required=False)
+
+    # dry-run subparser
+    dry_parser = subparsers.add_parser(
+        "dry-run",
+        help="Validate all 25 asset prompts and print credit cost estimates without calling the API.",
+    )
+    dry_parser.add_argument(
+        "--zone",
+        choices=list(CIVILIZATION_STYLES.keys()),
+        metavar="ZONE",
+        help="Filter dry-run to a specific civilization zone.",
+    )
 
     # test-connection
     subparsers.add_parser(
@@ -451,6 +678,11 @@ examples:
             f"Choices: {{'{chr(39).join(CIVILIZATION_STYLES.keys())}'}}"
         ),
     )
+    gen_civ.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Perform dry run without calling API.",
+    )
 
     # generate-all
     gen_all = subparsers.add_parser(
@@ -463,6 +695,17 @@ examples:
         default=2,
         metavar="N",
         help="Max concurrent civilization packs (default: 2).",
+    )
+    gen_all.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Perform dry run without calling API.",
+    )
+    gen_all.add_argument(
+        "--zone",
+        choices=list(CIVILIZATION_STYLES.keys()),
+        metavar="ZONE",
+        help="Filter generation to a specific civilization zone.",
     )
 
     return parser
@@ -478,6 +721,21 @@ def main() -> None:
     args = parser.parse_args()
 
     _configure_logging(verbose=args.verbose)
+
+    is_dry_run = (
+        getattr(args, "dry_run", False)
+        or args.command == "dry-run"
+    )
+
+    if is_dry_run:
+        zone = getattr(args, "civ", None) or getattr(args, "zone", None)
+        exit_code = run_dry_run(zone_filter=zone)
+        sys.exit(exit_code)
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+
     api_key = _load_api_key()
 
     exit_code: int = 0

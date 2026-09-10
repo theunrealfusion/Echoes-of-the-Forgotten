@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="refresh" content="0; url=game/index.html" />
+  <link rel="canonical" href="game/index.html" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏛️</text></svg>" />
+  <title>A Gift for the Forgotten City</title>
+  <meta name="description" content="Explore the void, collect echoes, and restore a lost civilization in this Three.js & WebXR experience for Tripothon S1." />
+  <meta name="theme-color" content="#0a0510" />
+
+  <!-- OpenGraph / Social Meta -->
+  <meta property="og:title" content="A Gift for the Forgotten City" />
+  <meta property="og:description" content="A 3D restoration journey across 5 forgotten civilizations built with Three.js, Tripo AI, and WebXR." />
+  <meta property="og:type" content="website" />
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #05020d;
+      color: #e2d9f3;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 24px;
+    }
+    .container {
+      max-width: 480px;
+      padding: 40px 32px;
+      background: rgba(26, 8, 48, 0.4);
+      border: 1px solid rgba(200, 162, 245, 0.2);
+      border-radius: 16px;
+      box-shadow: 0 0 40px rgba(124, 58, 237, 0.2);
+      backdrop-filter: blur(12px);
+    }
+    h1 {
+      font-size: 1.8rem;
+      margin-bottom: 12px;
+      color: #ffffff;
+      letter-spacing: 0.04em;
+    }
+    .highlight {
+      color: #f5c842;
+    }
+    p {
+      font-size: 0.95rem;
+      color: #a89bc2;
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+    a.btn {
+      display: inline-block;
+      padding: 12px 28px;
+      background: linear-gradient(135deg, #7c3aed, #6366f1);
+      color: #ffffff;
+      text-decoration: none;
+      font-weight: 500;
+      border-radius: 9999px;
+      transition: transform 0.2s, box-shadow 0.2s;
+      box-shadow: 0 0 20px rgba(124, 58, 237, 0.4);
+    }
+    a.btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 30px rgba(200, 162, 245, 0.6);
+    }
+  </style>
+
+  <script>
+    // Immediate redirect to the game client
+    window.location.replace("game/index.html");
+  </script>
+</head>
+<body>
+  <div class="container">
+    <h1>A Gift for the <span class="highlight">Forgotten City</span></h1>
+    <p>Entering the void… If you are not redirected automatically, click below to enter.</p>
+    <a href="game/index.html" class="btn">Enter the Forgotten City</a>
+  </div>
+</body>
+</html>

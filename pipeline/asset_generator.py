@@ -14,11 +14,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
+import sys
 from pathlib import Path
 from typing import Optional
 
-from .tripo_client import TripoClient, TripoAPIError, TripoTimeoutError
+_repo_root = Path(__file__).resolve().parent.parent
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
+
+try:
+    from .tripo_client import TripoClient, TripoAPIError, TripoTimeoutError
+except (ImportError, ValueError):
+    from pipeline.tripo_client import TripoClient, TripoAPIError, TripoTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -60,15 +67,304 @@ CIVILIZATION_STYLES: dict[str, str] = {
     ),
 }
 
-# Asset types generated for every civilization pack
+# Five core asset types generated for each civilization (total 25 game assets)
 _ASSET_TYPES: list[str] = [
     "main_building",
     "secondary_building",
     "landmark",
     "artifact",
     "vegetation",
-    "creature",
 ]
+
+#: Complete specification and bespoke, architecturally distinct prompts for all 25
+#: core assets across the five civilizations, optimized for Tripo V3 3D generation.
+CIVILIZATION_ASSETS: dict[str, dict[str, dict]] = {
+    "sunken_library": {
+        "main_building": {
+            "name": "main_hall",
+            "title": "The Grand Archive of Ael-Maris",
+            "prompt": (
+                "The Grand Archive of Ael-Maris, hero building asset, ancient submerged scholar civilization. "
+                "Imposing submerged stone library hall with monumental tidal arches, bioluminescent amber glyphs "
+                "etched into weathered sea-stone, exterior encrusted with fan coral, central arched portal. "
+                "Isolated single game-ready building, centered, neutral lighting, 3D model, clean silhouette, 8k PBR."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "secondary_building": {
+            "name": "scroll_tower",
+            "title": "The Submerged Scroll Tower",
+            "prompt": (
+                "The Submerged Scroll Tower, secondary building asset, ancient underwater scholars civilization. "
+                "Slender cylindrical stone archive tower with spiraling coral buttresses, carved alcoves holding "
+                "sealed waterproof cylinder canisters, glowing amber script bands around perimeter. "
+                "Modular mid-sized game prop, isolated 3D asset, game-ready topology, 4k PBR."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "landmark": {
+            "name": "great_lens",
+            "title": "The Great Abyssal Lens",
+            "prompt": (
+                "The Great Abyssal Lens, monumental landmark asset, ancient underwater scholar civilization. "
+                "Massive circular focusing apparatus of brass armillary rings holding a thick luminous sea-glass "
+                "optical prism, mounted on an ornate coral-encrusted stone pedestal, radiating aquamarine glow. "
+                "Vertical skyline focal point, isolated 3D game asset, PBR textures."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "artifact": {
+            "name": "knowledge_orb",
+            "title": "The Knowledge Orb",
+            "prompt": (
+                "The Knowledge Orb, hero artifact relic, ancient underwater scholars civilization. "
+                "Spherical ornate reliquary made of etched verdigris bronze filigree encasing a glowing floating "
+                "crystalline pearl, pulsing with inner cyan light and ancient floating glyph runes. "
+                "Intricate small-scale prop, centered, isolated 3D model, 4k PBR textures."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "vegetation": {
+            "name": "coral_growth",
+            "title": "Abyssal Bioluminescent Coral Colony",
+            "prompt": (
+                "Abyssal Bioluminescent Coral Colony, organic environmental asset. "
+                "Clustered branching staghorn and shelf coral formation with glowing turquoise polyps and phosphorescent "
+                "sea anemones growing over submerged weathered stone base. "
+                "Modular environment prop, game-ready low poly asset, isolated 3D model, PBR textures."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+    },
+    "sky_nomads": {
+        "main_building": {
+            "name": "cloud_palace",
+            "title": "The Cloud Palace",
+            "prompt": (
+                "The Cloud Palace, grand main hall of the Sky Nomads civilization. "
+                "Magnificent central palace constructed of faceted pale quartz and crystalline ice arches, "
+                "featuring an aerodynamic domed pavilion, mooring spires with fluttering wind-banners, "
+                "and an ornate landing apron. Hero scale, isolated single architectural model, game-ready 3D asset, PBR."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "secondary_building": {
+            "name": "crystal_spire",
+            "title": "The Aether Spire",
+            "prompt": (
+                "The Aether Spire, secondary building of the Sky Nomads civilization. "
+                "Tall needle-like watchtower made of pale blue quartz crystal and silver filigree struts, "
+                "with an integrated wind-turbine vane and a small suspended observation gondola at the apex. "
+                "Mid-size vertical modular game prop, isolated 3D asset, game-ready geometry, PBR textures."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "landmark": {
+            "name": "wind_altar",
+            "title": "The Celestial Wind Altar",
+            "prompt": (
+                "The Celestial Wind Altar, monumental landmark of the Sky Nomads civilization. "
+                "Elevated crystalline shrine platform supporting concentric spinning aeromantic rings and "
+                "tall prayer obelisks, woven with kinetic silk ribbons that catch upper currents, glowing pale cyan. "
+                "Iconic skyline anchor, isolated 3D asset, game-ready mesh, PBR textures."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "artifact": {
+            "name": "navigation_compass",
+            "title": "The Aether Navigation Compass",
+            "prompt": (
+                "The Aether Navigation Compass, handheld hero relic artifact of the Sky Nomads. "
+                "Ornate spherical astrolabe crafted from silver, ivory, and clear sapphire crystal, "
+                "containing floating gimbaled gyro-rings and an inner levitating wind-pointer that emits a faint aurora glow. "
+                "Intricate relic prop, isolated 3D model, game-ready asset, 4k PBR."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "vegetation": {
+            "name": "sky_bloom",
+            "title": "The Sky Bloom",
+            "prompt": (
+                "The Sky Bloom, floating flora environmental asset of the Sky Nomads. "
+                "Aerial cloud orchid with translucent, crystalline petals in shades of iridescent lavender and sky-blue, "
+                "rooted in a porous pumice floating bulb with trailing gossamer airborne rootlets. "
+                "Modular organic prop, isolated 3D game asset, PBR textures."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+    },
+    "deep_forge": {
+        "main_building": {
+            "name": "forge_cathedral",
+            "title": "The Great Forge Cathedral of Khal-Drun",
+            "prompt": (
+                "The Great Forge Cathedral of Khal-Drun, grand main building, underground dwarven smith civilization. "
+                "Monumental fortress-foundry crafted from faceted black obsidian and dark basalt blocks, "
+                "reinforced by massive wrought-iron buttresses and glowing magma intake conduits, "
+                "featuring a colossal arched entryway. Hero scale, isolated 3D building, PBR."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "secondary_building": {
+            "name": "obsidian_tower",
+            "title": "The Smelting Blast Tower",
+            "prompt": (
+                "The Smelting Blast Tower, secondary building asset, underground craftsman civilization. "
+                "Heavy hexagonal obsidian furnace tower with banded iron reinforcement rings, smoking exhaust flues at the crown, "
+                "glowing slag chutes at base, and rune-stamped iron access doors. "
+                "Mid-size modular game prop, isolated 3D asset, game-ready mesh, PBR textures."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "landmark": {
+            "name": "great_anvil",
+            "title": "The Great Primordial Anvil",
+            "prompt": (
+                "The Great Primordial Anvil, monumental landmark monument, master craftsman civilization. "
+                "Colossal monolithic anvil carved from a single piece of dark meteoric iron and black obsidian, "
+                "engraved with blazing fire-runes, resting on an elevated basalt plinth surrounded by four eternal rune-braziers. "
+                "Iconic visual anchor, isolated 3D asset, PBR textures."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "artifact": {
+            "name": "soul_hammer",
+            "title": "The Soul Hammer of Khal-Drun",
+            "prompt": (
+                "The Soul Hammer of Khal-Drun, handheld legendary relic artifact. "
+                "Masterwork warhammer and smithing mallet forged from dark damascus steel with a faceted obsidian core, "
+                "wrapped in heat-resistant dragon-leather on the haft, head etched with glowing orange volcanic runes. "
+                "Hero showcase prop, isolated single object, game-ready 3D model, 4k PBR."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "vegetation": {
+            "name": "lava_moss",
+            "title": "Lava Moss and Pyrite Lichen Clump",
+            "prompt": (
+                "Lava Moss and Pyrite Lichen Clump, volcanic cave flora environmental asset. "
+                "Hardened obsidian rock cluster overgrown with glowing ember-hot fungal growths, incandescent fire-moss, "
+                "and crystalline sulfur blooms that smolder with gentle orange embers. "
+                "Modular environment scatter prop, isolated 3D model, low poly game-ready asset, PBR."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+    },
+    "memory_gardens": {
+        "main_building": {
+            "name": "spirit_temple",
+            "title": "The Spirit Temple of the Seren",
+            "prompt": (
+                "The Spirit Temple of the Seren, grand main hall of the spiritual garden civilization. "
+                "Tiered East-Asian inspired sanctuary temple crafted from weather-worn pale jade stone and dark cedar timber, "
+                "featuring sweeping curved pagoda eaves, hanging bronze wind chimes, moss-covered stairways, "
+                "and luminous paper lantern fixtures. Hero scale, isolated 3D building, PBR."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "secondary_building": {
+            "name": "lantern_gate",
+            "title": "The Torii Lantern Gate",
+            "prompt": (
+                "The Torii Lantern Gate, secondary architectural structure of the Memory Gardens. "
+                "Ceremonial stone-and-timber archway gate draped with trailing wisteria vines and moss, "
+                "featuring carved spirit niches with softly glowing tea-lanterns and hanging white prayer ribbons. "
+                "Mid-size entrance prop, isolated 3D asset, game-ready topology, PBR textures."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "landmark": {
+            "name": "memory_tree",
+            "title": "The Great Memory Tree",
+            "prompt": (
+                "The Great Memory Tree, monumental centerpiece landmark. "
+                "Enormous ancient gnarled sacred banyan tree with exposed twisting roots wrapped around stone meditation plinths, "
+                "its lush canopy holding thousands of small glowing spirit leaf-gems and hanging spectral lanterns "
+                "that cast a soft golden-green glow. Iconic skyline visual anchor, isolated 3D model, PBR."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "artifact": {
+            "name": "spirit_bell",
+            "title": "The Spirit Bell of Remembrance",
+            "prompt": (
+                "The Spirit Bell of Remembrance, handheld hero relic artifact. "
+                "Ceremonial temple hand-bell cast from weathered singing bronze with intricate lotus petal reliefs, "
+                "crowned with a carved jade handle in the likeness of a coiled serpent, radiating a soft emerald resonance aura. "
+                "Hero showcase prop, isolated 3D model, game-ready, 4k PBR textures."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "vegetation": {
+            "name": "sacred_bloom",
+            "title": "The Sacred Spirit Lotus Cluster",
+            "prompt": (
+                "The Sacred Spirit Lotus Cluster, flora environment prop. "
+                "Cluster of oversized stylized aquatic lotus blossoms with luminescent soft-pink and white petals, "
+                "surrounding a glowing golden seedpod, resting atop broad mossy lily pads with small dew-droplet crystals. "
+                "Modular environment asset, isolated 3D game model, clean mesh, PBR textures."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+    },
+    "grand_reunion": {
+        "main_building": {
+            "name": "unity_hall",
+            "title": "The Unity Hall of Convergence",
+            "prompt": (
+                "The Unity Hall of Convergence, monumental grand hall of the Grand Reunion. "
+                "Colossal domed meeting rotunda harmonizing four civilization motifs: polished white marble porticos "
+                "supported by bioluminescent coral columns, soaring crystalline spire pinnacles, obsidian floor inlay, "
+                "and cascading hanging garden balconies, warm golden glow. Hero scale, isolated 3D building, PBR."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "secondary_building": {
+            "name": "ceremonial_arch",
+            "title": "The Ceremonial Arch of Four Paths",
+            "prompt": (
+                "The Ceremonial Arch of Four Paths, secondary architectural structure of the Grand Reunion. "
+                "Soaring four-sided triumphal gateway where each archway is styled after one civilization "
+                "(coral-engraved stone, frost-quartz crystal, runic obsidian, and sacred cedar timber), "
+                "converging into a central golden keystone. Mid-size architectural prop, isolated 3D asset, PBR textures."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "landmark": {
+            "name": "world_tree",
+            "title": "The Cosmic World Tree of Remembrance",
+            "prompt": (
+                "The Cosmic World Tree of Remembrance, monumental landmark asset of the Grand Reunion. "
+                "Towering ethereal tree formed of intertwined elements—crystalline trunk, glowing amber-sap veins, "
+                "volcanic obsidian boughs, and leaves woven of starlight and living sea-coral, radiating a brilliant golden aura. "
+                "Iconic skyline visual anchor, isolated 3D model, PBR textures."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "artifact": {
+            "name": "gift_monument",
+            "title": "The Gift of Memory Relic",
+            "prompt": (
+                "The Gift of Memory Relic, ultimate hero artifact of the Grand Reunion. "
+                "Masterwork four-part harmonic talisman: an intertwined ring combining abyssal sea-glass, sky quartz, "
+                "forged star-metal, and petrified sacred cedar, hovering around a central pulsing golden heart-spark. "
+                "Hero showcase asset, isolated single object, game-ready 3D model, 4k PBR textures."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+        "vegetation": {
+            "name": "harmonic_flora",
+            "title": "The Harmonic Convergence Flora",
+            "prompt": (
+                "The Harmonic Convergence Flora, organic environment prop of the Grand Reunion. "
+                "Rare synthesis plant featuring crystal-edged lotus petals, sea-coral stamen that softly pulse with bioluminescence, "
+                "and warm golden fern fronds sprouting from a smooth black obsidian stone base. "
+                "Modular environment scatter prop, isolated 3D asset, game-ready mesh, PBR textures."
+            ),
+            "estimated_credits": {"text_to_3d": 30, "retopology": 20, "pbr": 10, "total": 60},
+        },
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -142,17 +438,19 @@ class ForgottenCityAssetGenerator:
         civ_dir.mkdir(parents=True, exist_ok=True)
 
         async with TripoClient(self._api_key) as client:
-            tasks = {
-                asset_type: asyncio.create_task(
+            tasks = {}
+            for asset_type, prompt_text in prompts.items():
+                model_name = asset_type
+                if civ_name in CIVILIZATION_ASSETS and asset_type in CIVILIZATION_ASSETS[civ_name]:
+                    model_name = CIVILIZATION_ASSETS[civ_name][asset_type]["name"]
+                tasks[asset_type] = asyncio.create_task(
                     self._generate_and_optimize(
                         client=client,
-                        name=asset_type,
-                        prompt=prompts[asset_type],
-                        output_path=str(civ_dir / f"{asset_type}.glb"),
+                        name=model_name,
+                        prompt=prompt_text,
+                        output_path=str(civ_dir / f"{model_name}.glb"),
                     )
                 )
-                for asset_type in _ASSET_TYPES
-            }
 
             results: dict[str, str] = {}
             for asset_type, task in tasks.items():
@@ -428,10 +726,10 @@ class ForgottenCityAssetGenerator:
     def _get_civilization_prompts(
         self, civ_name: str, style_description: str
     ) -> dict[str, str]:
-        """Build structured prompts for all six asset types of a civilization.
+        """Build structured prompts for all core asset types of a civilization.
 
-        Each prompt embeds *style_description* as an aesthetic anchor and
-        appends asset-type-specific geometry guidance for best results.
+        Uses handcrafted 5/5 quality prompts from :data:`CIVILIZATION_ASSETS`
+        when available, falling back to dynamic template generation.
 
         Args:
             civ_name: Civilization slug (used in logging only).
@@ -440,6 +738,12 @@ class ForgottenCityAssetGenerator:
         Returns:
             Dict mapping each :data:`_ASSET_TYPES` key to a full prompt string.
         """
+        if civ_name in CIVILIZATION_ASSETS:
+            return {
+                asset_type: data["prompt"]
+                for asset_type, data in CIVILIZATION_ASSETS[civ_name].items()
+            }
+
         base = style_description.rstrip(".")
 
         return {
@@ -468,9 +772,10 @@ class ForgottenCityAssetGenerator:
                 "Stylised foliage or coral or fungal growth appropriate to the setting, "
                 "modular environment tile, game-ready 3D asset."
             ),
-            "creature": (
-                f"Creature or wildlife native to the {civ_name} civilization. {base}. "
-                "Distinctive silhouette, game-ready anatomy suitable for rigging, "
-                "medium creature scale, stylised 3D asset."
-            ),
         }
+
+
+def get_all_prompts() -> dict[str, dict[str, dict]]:
+    """Return all 25 production prompts and metadata across 5 civilizations."""
+    return CIVILIZATION_ASSETS
+

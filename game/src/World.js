@@ -34,74 +34,84 @@ export const ZONE_CONFIGS = {
   sunken_library: {
     id:     'sunken_library',
     name:   'The Sunken Library',
-    flavor: 'Tomes older than memory lie half-submerged in silence.',
+    flavor: 'A civilization of scholars lost beneath the waves',
     restoration_message: 'Ancient pages unfurl once more, and long-forgotten words drift through restored halls.',
     position:   [0, 0, 0],
-    radius:     60,
-    echo_count: 7,
-    color_theme:'#6366f1',
+    radius:     80,
+    echo_count: 8,
+    color_theme:'#40e0d0',
     model_files: [
-      'models/sunken_library/library_main.glb',
-      'models/sunken_library/reading_alcove.glb',
-      'models/sunken_library/archive_tower.glb',
+      'models/sunken_library/main_hall.glb',
+      'models/sunken_library/scroll_tower.glb',
+      'models/sunken_library/great_lens.glb',
+      'models/sunken_library/knowledge_orb.glb',
+      'models/sunken_library/coral_growth.glb',
     ],
   },
   sky_nomads: {
     id:     'sky_nomads',
-    name:   'Sky Nomads Quarter',
-    flavor: 'Wind-worn platforms drift above the void, carrying the last of their songs.',
+    name:   'The Sky Nomads',
+    flavor: 'Cloud cities that drifted away forever',
     restoration_message: 'The wind-ships anchor again, and music returns on the upper currents.',
-    position:   [200, 80, -100],
-    radius:     50,
-    echo_count: 6,
-    color_theme:'#22d3ee',
+    position:   [200, 50, 0],
+    radius:     70,
+    echo_count: 7,
+    color_theme:'#7c9fff',
     model_files: [
-      'models/sky_nomads/floating_platform.glb',
-      'models/sky_nomads/wind_shrine.glb',
+      'models/sky_nomads/cloud_palace.glb',
+      'models/sky_nomads/crystal_spire.glb',
+      'models/sky_nomads/wind_altar.glb',
+      'models/sky_nomads/navigation_compass.glb',
+      'models/sky_nomads/sky_bloom.glb',
     ],
   },
   deep_forge: {
     id:     'deep_forge',
     name:   'The Deep Forge',
-    flavor: 'Hammers fell silent long ago, but the embers still remember the shape of things made.',
+    flavor: 'Master craftsmen swallowed by the earth',
     restoration_message: 'Bellows breathe again; the forge sings its iron song into the dark.',
-    position:   [-150, -30, 120],
-    radius:     55,
-    echo_count: 8,
-    color_theme:'#f97316',
+    position:   [-200, -20, 0],
+    radius:     90,
+    echo_count: 9,
+    color_theme:'#ff6b00',
     model_files: [
-      'models/deep_forge/forge_central.glb',
-      'models/deep_forge/cooling_vats.glb',
-      'models/deep_forge/smith_quarters.glb',
+      'models/deep_forge/forge_cathedral.glb',
+      'models/deep_forge/obsidian_tower.glb',
+      'models/deep_forge/great_anvil.glb',
+      'models/deep_forge/soul_hammer.glb',
+      'models/deep_forge/lava_moss.glb',
     ],
   },
   memory_gardens: {
     id:     'memory_gardens',
-    name:   'Memory Gardens',
-    flavor: 'Every petal holds the face of someone who once walked here.',
+    name:   'The Memory Gardens',
+    flavor: 'Spiritual keepers whose temples were silenced',
     restoration_message: 'Blossoms return with impossible colours, and the air carries names aloud.',
-    position:   [80, 0, 200],
-    radius:     45,
-    echo_count: 5,
-    color_theme:'#34d399',
+    position:   [0, 0, -250],
+    radius:     85,
+    echo_count: 10,
+    color_theme:'#a8e6a8',
     model_files: [
-      'models/memory_gardens/pavilion.glb',
-      'models/memory_gardens/fountain_of_names.glb',
+      'models/memory_gardens/spirit_temple.glb',
+      'models/memory_gardens/lantern_gate.glb',
+      'models/memory_gardens/memory_tree.glb',
+      'models/memory_gardens/spirit_bell.glb',
+      'models/memory_gardens/sacred_bloom.glb',
     ],
   },
   grand_reunion: {
     id:     'grand_reunion',
-    name:   'Grand Reunion Hall',
-    flavor: 'The last gathering place — where all roads of the forgotten city converged.',
+    name:   'The Grand Reunion',
+    flavor: 'Where all forgotten people finally meet',
     restoration_message: 'Every restored zone pulses in unison. The city breathes again, whole and remembered.',
-    position:   [0, 0, -300],
-    radius:     80,
-    echo_count: 10,
+    position:   [0, 0, 0],
+    radius:     150,
+    echo_count: 20,
     color_theme:'#f5c842',
     model_files: [
-      'models/grand_reunion/great_hall.glb',
-      'models/grand_reunion/ceremonial_arch.glb',
-      'models/grand_reunion/bell_tower.glb',
+      'models/grand_reunion/unity_hall.glb',
+      'models/grand_reunion/world_tree.glb',
+      'models/grand_reunion/gift_monument.glb',
     ],
   },
 };
@@ -119,9 +129,9 @@ export const ZONE_CONFIGS = {
 export class World {
   /**
    * @param {THREE.Scene}  scene
-   * @param {string}       tripoManifestPath  - Path to asset manifest JSON
+   * @param {string}       [tripoManifestPath]  - Path to asset manifest JSON
    */
-  constructor(scene, tripoManifestPath) {
+  constructor(scene, tripoManifestPath = '../assets/manifests/zones.json') {
     /** @type {THREE.Scene} */
     this.scene = scene;
 
@@ -130,6 +140,21 @@ export class World {
 
     /** @type {GLTFLoader} */
     this.loader = new GLTFLoader();
+
+    /** @type {Record<string, ZoneConfig>} */
+    this.zoneConfigs = JSON.parse(JSON.stringify(ZONE_CONFIGS));
+
+    /**
+     * Set of available model files verified to exist.
+     * @type {Set<string>}
+     */
+    this.availableModels = new Set();
+
+    /**
+     * Fast lookup array for animated shader materials to avoid scene traversal.
+     * @type {THREE.ShaderMaterial[]}
+     */
+    this._animatedMaterials = [];
 
     /**
      * Tracks all THREE.Group objects placed per zone.
@@ -155,6 +180,38 @@ export class World {
     // Void ambient light — very dim, colour-tinted
     this._ambientLight = new THREE.AmbientLight(0x1a0830, 0.4);
     scene.add(this._ambientLight);
+  }
+
+  /**
+   * Optionally fetches runtime manifest if available.
+   * @param {string} [path]
+   * @returns {Promise<void>}
+   */
+  async loadManifest(path = this.manifestPath) {
+    try {
+      const resp = await fetch(path);
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && Array.isArray(data.zones)) {
+          for (const z of data.zones) {
+            const accent = typeof z.color_theme === 'object' ? z.color_theme.accent : (z.color_theme || '#c8a2f5');
+            this.zoneConfigs[z.id] = {
+              id: z.id,
+              name: z.name,
+              flavor: z.subtitle || z.lore || '',
+              restoration_message: z.lore || (ZONE_CONFIGS[z.id]?.restoration_message ?? ''),
+              position: z.position || [0, 0, 0],
+              radius: z.radius || 60,
+              echo_count: z.echo_count || 5,
+              color_theme: accent,
+              model_files: z.models ? Object.values(z.models) : (ZONE_CONFIGS[z.id]?.model_files ?? []),
+            };
+          }
+        }
+      }
+    } catch (_) {
+      // Offline / fallback to static ZONE_CONFIGS
+    }
   }
 
   // ── Environment setup ────────────────────────────────────────────────────
@@ -188,7 +245,7 @@ export class World {
    * @private
    */
   _createGlobalParticleField() {
-    const COUNT = 3000;
+    const COUNT = 1500;
     const positions = new Float32Array(COUNT * 3);
     const colors    = new Float32Array(COUNT * 3);
     const spread    = 800;
@@ -232,8 +289,16 @@ export class World {
    * @param {string} zoneId
    * @returns {Promise<void>}
    */
+  /**
+   * Loads all buildings for a zone. For each model file listed in the zone
+   * config, it attempts a GLB load if registered as available; otherwise, a procedural
+   * placeholder is placed instead.
+   *
+   * @param {string} zoneId
+   * @returns {Promise<void>}
+   */
   async loadZone(zoneId) {
-    const cfg = ZONE_CONFIGS[zoneId];
+    const cfg = this.getZoneData(zoneId);
     if (!cfg) throw new Error(`Unknown zone: ${zoneId}`);
 
     const group = new THREE.Group();
@@ -241,22 +306,39 @@ export class World {
     const [cx, cy, cz] = cfg.position;
     group.position.set(cx, cy, cz);
 
+    // Subtle dark circular zone pedestal to anchor buildings in the void
+    const pedestalGeo = new THREE.CylinderGeometry(cfg.radius * 0.85, cfg.radius * 0.9, 1.5, 32);
+    pedestalGeo.translate(0, -0.75, 0);
+    const pedestalMat = this._makeVoidShaderMaterial(new THREE.Color(cfg.color_theme).getHex());
+    const pedestalMesh = new THREE.Mesh(pedestalGeo, pedestalMat);
+    pedestalMesh.name = `pedestal_${zoneId}`;
+    group.add(pedestalMesh);
+
     const placed = [];
 
     // Arrangement: spread buildings around the zone centre
-    const slots = this._generateSlots(cfg.model_files.length, cfg.radius * 0.6);
+    const radiusFactor = zoneId === 'grand_reunion' ? 0.75 : 0.6;
+    const slots = this._generateSlots(cfg.model_files.length, cfg.radius * radiusFactor);
 
     for (let i = 0; i < cfg.model_files.length; i++) {
       const slot = slots[i];
-      let obj;
-      try {
-        obj = await this._loadGLB(cfg.model_files[i]);
-        obj.position.copy(slot.position);
-        obj.rotation.y = slot.rotation;
-      } catch (_) {
+      let obj = null;
+      const modelFile = cfg.model_files[i];
+
+      if (this.availableModels.has(modelFile)) {
+        try {
+          obj = await this._loadGLB(modelFile);
+          obj.position.copy(slot.position);
+          obj.rotation.y = slot.rotation;
+        } catch (_) {
+          obj = null;
+        }
+      }
+
+      if (!obj) {
         // Fallback: procedural placeholder
         const style = this._styleForIndex(i);
-        obj = this.createProceduralBuilding(style, slot.position, slot.scale);
+        obj = this.createProceduralBuilding(style, slot.position, slot.scale, cfg.color_theme);
       }
       group.add(obj);
       placed.push(obj);
@@ -264,7 +346,7 @@ export class World {
 
     // Zone-specific accent lighting
     const accentColor = new THREE.Color(cfg.color_theme);
-    const pointLight  = new THREE.PointLight(accentColor, 2, cfg.radius * 1.5);
+    const pointLight  = new THREE.PointLight(accentColor, 1.5, cfg.radius * 1.5);
     pointLight.position.set(0, 15, 0);
     group.add(pointLight);
 
@@ -273,6 +355,18 @@ export class World {
 
     // Place echo triggers
     this.placeEchoTriggers(zoneId, this._generateEchoPositions(cfg));
+  }
+
+  /**
+   * Loads all configured zones into the scene graph.
+   * Guarantees this.zoneObjects is populated for all 5 zones.
+   * @returns {Promise<void>}
+   */
+  async loadAllZones() {
+    const zoneIds = Object.keys(this.zoneConfigs);
+    for (const zoneId of zoneIds) {
+      await this.loadZone(zoneId);
+    }
   }
 
   /**
@@ -363,41 +457,44 @@ export class World {
    * @param {THREE.Vector3} [scale]
    * @returns {THREE.Group}
    */
-  createProceduralBuilding(style, position, scale) {
+  createProceduralBuilding(style, position, scale, colorTheme = 0xc8a2f5) {
     const group = new THREE.Group();
     group.position.copy(position);
     if (scale) group.scale.copy(scale);
 
-    const mat = this._makeVoidShaderMaterial(0xc8a2f5);
+    const mat = this._makeVoidShaderMaterial(colorTheme);
 
     let geo;
     switch (style) {
       case 'tower':
-        geo = new THREE.CylinderGeometry(1, 1.5, 12, 8);
+        geo = new THREE.CylinderGeometry(1.2, 2.0, 14, 8);
+        geo.translate(0, 7, 0);
         break;
       case 'dome':
         geo = new THREE.SphereGeometry(5, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2);
         break;
       case 'arch': {
-        // Simple arch approximation: two pillars + lintel box
-        const pillar   = new THREE.BoxGeometry(1, 8, 1);
-        const lintel   = new THREE.BoxGeometry(6, 1, 1);
-        const mL = new THREE.Mesh(pillar, mat.clone()); mL.position.set(-2.5, 4, 0);
-        const mR = new THREE.Mesh(pillar, mat.clone()); mR.position.set( 2.5, 4, 0);
-        const mT = new THREE.Mesh(lintel, mat.clone()); mT.position.set(0, 8.5, 0);
+        // Arch approximation: two pillars + lintel box with bases aligned
+        const pillar = new THREE.BoxGeometry(1, 8, 1);
+        pillar.translate(0, 4, 0);
+        const lintel = new THREE.BoxGeometry(6, 1, 1);
+        lintel.translate(0, 8.5, 0);
+        const mL = new THREE.Mesh(pillar, mat); mL.position.set(-2.5, 0, 0);
+        const mR = new THREE.Mesh(pillar, mat); mR.position.set( 2.5, 0, 0);
+        const mT = new THREE.Mesh(lintel, mat); mT.position.set(0, 0, 0);
         group.add(mL, mR, mT);
         return group;
       }
       case 'cluster': {
-        // Small cluster of boxes at random offsets
+        // Small cluster of boxes with bases aligned
         for (let k = 0; k < 4; k++) {
-          const cg = new THREE.BoxGeometry(
-            1 + Math.random() * 2,
-            2 + Math.random() * 6,
-            1 + Math.random() * 2,
-          );
-          const cm = new THREE.Mesh(cg, mat.clone());
-          cm.position.set((Math.random()-0.5)*6, 0, (Math.random()-0.5)*6);
+          const w = 1 + Math.random() * 2;
+          const h = 2 + Math.random() * 6;
+          const d = 1 + Math.random() * 2;
+          const cg = new THREE.BoxGeometry(w, h, d);
+          cg.translate(0, h / 2, 0);
+          const cm = new THREE.Mesh(cg, mat);
+          cm.position.set((Math.random() - 0.5) * 6, 0, (Math.random() - 0.5) * 6);
           group.add(cm);
         }
         return group;
@@ -405,24 +502,26 @@ export class World {
       case 'slab':
       default:
         geo = new THREE.BoxGeometry(8, 5, 4);
+        geo.translate(0, 2.5, 0);
         break;
     }
 
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.castShadow = true;
+    mesh.castShadow = false;
     group.add(mesh);
     return group;
   }
 
   /**
    * Creates the void wireframe+glow ShaderMaterial.
-   * @param {number} color  - hex colour integer
+   * Registers material in _animatedMaterials for high-performance tick updates.
+   * @param {string|number} color  - hex colour integer or string
    * @returns {THREE.ShaderMaterial}
    * @private
    */
   _makeVoidShaderMaterial(color) {
     const c = new THREE.Color(color);
-    return new THREE.ShaderMaterial({
+    const mat = new THREE.ShaderMaterial({
       uniforms: {
         u_color:    { value: c },
         u_progress: { value: 0.0 },   // 0 = full void wireframe, 1 = solid
@@ -483,6 +582,9 @@ export class World {
       side:          THREE.DoubleSide,
       depthWrite:    false,
     });
+
+    this._animatedMaterials.push(mat);
+    return mat;
   }
 
   // ── Echo triggers ─────────────────────────────────────────────────────────
@@ -493,7 +595,7 @@ export class World {
    * @param {THREE.Vector3[]}  positions  - Local to zone group
    */
   placeEchoTriggers(zoneId, positions) {
-    const cfg      = ZONE_CONFIGS[zoneId];
+    const cfg      = this.getZoneData(zoneId);
     const [cx,cy,cz] = cfg.position;
     const triggers = [];
 
@@ -554,15 +656,16 @@ export class World {
 
   /**
    * Update animated shader time uniforms each frame.
+   * Fast array-based loop avoiding scene graph traversal overhead.
    * @param {number} time  - total elapsed time (seconds)
    */
   tick(time) {
-    this.scene.traverse(child => {
-      const mesh = /** @type {any} */ (child);
-      if (mesh.isMesh && mesh.material?.uniforms?.u_time !== undefined) {
-        mesh.material.uniforms.u_time.value = time;
+    const mats = this._animatedMaterials;
+    for (let i = 0; i < mats.length; i++) {
+      if (mats[i].uniforms && mats[i].uniforms.u_time) {
+        mats[i].uniforms.u_time.value = time;
       }
-    });
+    }
     // Slowly rotate the global void particle field
     if (this._globalParticles) {
       this._globalParticles.rotation.y += 0.00005;
@@ -576,7 +679,7 @@ export class World {
    * @returns {ZoneConfig}
    */
   getZoneData(zoneId) {
-    const cfg = ZONE_CONFIGS[zoneId];
+    const cfg = this.zoneConfigs[zoneId] || ZONE_CONFIGS[zoneId];
     if (!cfg) throw new Error(`No zone config for: ${zoneId}`);
     return cfg;
   }
