@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="description" content="A Gift for the Forgotten City — explore the void, collect echoes, restore a lost civilization." />
+  <meta name="theme-color" content="#0a0510" />
+
+  <title>A Gift for the Forgotten City</title>
+
+  <!-- Google Fonts: Cinzel (titles) + Inter (UI) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Inter:wght@300;400;500&display=swap"
+    rel="stylesheet"
+  />
+
+  <!-- Game Styles -->
+  <link rel="stylesheet" href="style.css" />
+
+  <!--
+    Import Map — Three.js r160+ via esm.sh CDN.
+    All subpath imports (examples/jsm/*) resolve here so that
+    PointerLockControls, GLTFLoader, EffectComposer, etc. work correctly.
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://esm.sh/three@0.160.0",
+      "three/addons/": "https://esm.sh/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+
+  <!-- ─────────────────── PRIMARY GAME CANVAS ─────────────────── -->
+  <canvas id="game-canvas" aria-label="A Gift for the Forgotten City — game viewport"></canvas>
+
+  <!-- ─────────────────── LOADING SCREEN ─────────────────── -->
+  <!--
+    Shown on startup; fades out once init() completes.
+    #particle-canvas is populated by the CSS particle animation system.
+  -->
+  <div id="loading-screen" role="status" aria-live="polite">
+    <canvas id="particle-canvas" aria-hidden="true"></canvas>
+
+    <div class="loading-content">
+      <h1 class="loading-title">
+        A Gift for the<br />
+        <span class="golden">Forgotten City</span>
+      </h1>
+      <p class="loading-subtitle">Entering the Void&hellip;</p>
+
+      <!-- Determinate progress bar updated by main.js -->
+      <div class="loading-bar-track" aria-hidden="true">
+        <div class="loading-bar-fill" id="loading-bar-fill"></div>
+      </div>
+
+      <p class="loading-tip" id="loading-tip">
+        &ldquo;Every echo remembers what the void tried to erase.&rdquo;
+      </p>
+    </div>
+
+    <!-- Pure-CSS animated particles (no JS required) -->
+    <div class="css-particles" aria-hidden="true">
+      <span class="particle p1"></span><span class="particle p2"></span>
+      <span class="particle p3"></span><span class="particle p4"></span>
+      <span class="particle p5"></span><span class="particle p6"></span>
+      <span class="particle p7"></span><span class="particle p8"></span>
+      <span class="particle p9"></span><span class="particle p10"></span>
+      <span class="particle p11"></span><span class="particle p12"></span>
+    </div>
+  </div>
+
+  <!-- ─────────────────── HUD ─────────────────── -->
+  <div id="hud" class="hidden" role="complementary" aria-label="Game HUD">
+
+    <!-- Current zone name — top-left -->
+    <div id="zone-name" class="hud-zone-name" aria-live="polite"></div>
+
+    <!-- Context-sensitive hint — bottom center -->
+    <div id="hint-text" class="hud-hint" aria-live="polite">
+      Click to explore &mdash; <kbd>WASD</kbd> to move &bull; <kbd>E</kbd> to interact
+    </div>
+
+    <!-- Echo restoration progress meter — bottom right -->
+    <div class="hud-echo-wrap" title="Restoration Progress">
+      <span class="echo-label">ECHOES</span>
+      <div
+        class="echo-meter-track"
+        role="progressbar"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="0"
+        id="echo-meter-track"
+      >
+        <div class="echo-meter-fill" id="echo-meter"></div>
+        <span class="echo-meter-text" id="echo-meter-text">0 / 0</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─────────────────── ZONE TITLE OVERLAY ─────────────────── -->
+  <!--
+    Shown for ~3 s when entering a new zone.
+    Toggled via .visible class in World.js / GameEngine.
+  -->
+  <div id="zone-title" class="zone-title-overlay hidden" aria-live="assertive">
+    <div class="zone-title-inner">
+      <p class="zone-title-eyebrow">Entering Zone</p>
+      <h2 class="zone-title-name" id="zone-title-name"></h2>
+      <p class="zone-title-flavor" id="zone-title-flavor"></p>
+    </div>
+  </div>
+
+  <!-- ─────────────────── RESTORATION MESSAGE ─────────────────── -->
+  <!--
+    Full-screen golden overlay when a zone reaches 100 % restoration.
+    Revealed via .visible class by RestorationSystem.playRestorationAnimation().
+  -->
+  <div id="restoration-message" class="restoration-overlay hidden" aria-live="assertive" role="alert">
+    <div class="restoration-inner">
+      <div class="restoration-glow" aria-hidden="true"></div>
+      <p class="restoration-eyebrow">Zone Restored</p>
+      <h2 class="restoration-title" id="restoration-zone-name"></h2>
+      <p class="restoration-body" id="restoration-body-text">
+        The echoes have gathered. Memory returns to the forgotten city.
+      </p>
+      <button class="restoration-continue" id="restoration-continue-btn">
+        Continue Exploring
+      </button>
+    </div>
+  </div>
+
+  <!-- ─────────────────── MOBILE TOUCH CONTROLS ─────────────────── -->
+  <!--
+    Hidden on desktop via CSS media query.
+    Player.js handles joystick and look-pad touch events.
+  -->
+  <div id="mobile-controls" class="mobile-controls hidden" aria-label="Touch controls" role="toolbar">
+    <!-- Left virtual joystick for movement -->
+    <div id="virtual-joystick" class="virtual-joystick" aria-label="Movement joystick">
+      <div class="joystick-base">
+        <div class="joystick-knob" id="joystick-knob"></div>
+      </div>
+    </div>
+    <!-- Right touch area for camera look -->
+    <div id="look-pad" class="look-pad" aria-label="Look around"></div>
+  </div>
+
+  <!-- ─────────────────── GAME BOOTSTRAP ─────────────────── -->
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

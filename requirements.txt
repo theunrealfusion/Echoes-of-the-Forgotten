@@ -1,0 +1,24 @@
+# ==============================================================================
+# A Gift for the Forgotten City — Python Dependencies
+# ==============================================================================
+# Install with: pip install -r requirements.txt
+# Requires Python 3.9+
+
+# HTTP clients — synchronous and async Tripo API calls
+requests>=2.31.0
+aiohttp>=3.9.0
+
+# Environment variable loading from .env file
+python-dotenv>=1.0.0
+
+# Image processing for concept art / texture utilities
+Pillow>=10.0.0
+
+# Progress bars for batch asset generation
+tqdm>=4.66.0
+
+# Rich terminal output (coloured logs, tables, status panels)
+rich>=13.7.0
+
+# Async utilities (stdlib on Python 3.4+, listed for explicit version pinning)
+asyncio>=3.4.3

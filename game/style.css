@@ -1,0 +1,557 @@
+/* =============================================================================
+   A Gift for the Forgotten City — style.css
+   Complete game UI stylesheet. Mobile-responsive.
+   ============================================================================= */
+
+/* ── Design Tokens ─────────────────────────────────────────────────────────── */
+:root {
+  /* Core palette */
+  --void:           #0a0510;   /* Deep indigo-black background           */
+  --echo:           #c8a2f5;   /* Purple glow — echo / uncollected state */
+  --restored:       #f5c842;   /* Golden warm light — restoration        */
+  --text-primary:   #e8dff5;   /* Soft lavender-white body text          */
+  --accent:         #7c3aed;   /* Vivid purple for interactive elements  */
+
+  /* Derived / helper */
+  --echo-dim:       rgba(200, 162, 245, 0.15);
+  --restored-dim:   rgba(245, 200, 66,  0.15);
+  --surface-glass:  rgba(10, 5, 16, 0.72);
+  --border-subtle:  rgba(200, 162, 245, 0.18);
+
+  /* Typography */
+  --font-title:     'Cinzel', 'Georgia', serif;
+  --font-ui:        'Inter', system-ui, sans-serif;
+
+  /* Spacing */
+  --hud-padding:    clamp(10px, 2vw, 20px);
+
+  /* Transitions */
+  --ease-glow:      cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* ── Reset & Base ───────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--void);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  touch-action: none;          /* disable scroll/pinch-zoom in game */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── Game Canvas ────────────────────────────────────────────────────────────── */
+#game-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  outline: none;
+  cursor: crosshair;
+}
+
+/* ── Utility ────────────────────────────────────────────────────────────────── */
+.hidden { display: none !important; }
+
+.golden { color: var(--restored); }
+
+/* ── Loading Screen ─────────────────────────────────────────────────────────── */
+#loading-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--void);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+
+  /* Fade-out triggered by JS adding .fade-out class */
+  transition: opacity 0.9s var(--ease-glow);
+}
+#loading-screen.fade-out {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Background particle canvas (JS-drawn on top of CSS particles) */
+#particle-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Central loading content card */
+.loading-content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 40px;
+  max-width: min(480px, 90vw);
+  text-align: center;
+}
+
+.loading-title {
+  font-family: var(--font-title);
+  font-size: clamp(1.6rem, 5vw, 2.6rem);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
+  text-shadow:
+    0 0 40px rgba(200, 162, 245, 0.6),
+    0 0 80px rgba(124, 58, 237, 0.3);
+  animation: titlePulse 3s ease-in-out infinite;
+}
+
+@keyframes titlePulse {
+  0%, 100% { text-shadow: 0 0 40px rgba(200, 162, 245, 0.6), 0 0 80px rgba(124, 58, 237, 0.3); }
+  50%       { text-shadow: 0 0 60px rgba(200, 162, 245, 0.9), 0 0 120px rgba(124, 58, 237, 0.5); }
+}
+
+.loading-subtitle {
+  font-size: 0.85rem;
+  font-weight: 300;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--echo);
+  opacity: 0.8;
+  animation: blink 1.8s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 0.8; }
+  50%       { opacity: 0.3; }
+}
+
+/* Loading bar */
+.loading-bar-track {
+  width: 100%;
+  height: 4px;
+  background: rgba(200, 162, 245, 0.12);
+  border-radius: 2px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+}
+
+.loading-bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--echo), var(--restored));
+  transition: width 0.4s var(--ease-glow);
+  box-shadow: 0 0 10px rgba(200, 162, 245, 0.7);
+}
+
+.loading-tip {
+  font-size: 0.78rem;
+  font-style: italic;
+  color: var(--text-primary);
+  opacity: 0.5;
+  line-height: 1.6;
+}
+
+/* ── CSS Particle System (Loading Screen) ────────────────────────────────────── */
+.css-particles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.particle {
+  position: absolute;
+  border-radius: 50%;
+  background: var(--echo);
+  opacity: 0;
+  animation: floatUp linear infinite;
+}
+
+/* Individual particle variations */
+.p1  { width: 3px;  height: 3px;  left: 10%; animation-duration: 8s;  animation-delay: 0s;    }
+.p2  { width: 2px;  height: 2px;  left: 20%; animation-duration: 12s; animation-delay: 1.5s;  }
+.p3  { width: 4px;  height: 4px;  left: 30%; animation-duration: 9s;  animation-delay: 0.5s;  background: var(--restored); }
+.p4  { width: 2px;  height: 2px;  left: 40%; animation-duration: 11s; animation-delay: 3s;    }
+.p5  { width: 5px;  height: 5px;  left: 50%; animation-duration: 7s;  animation-delay: 0.8s;  }
+.p6  { width: 2px;  height: 2px;  left: 60%; animation-duration: 13s; animation-delay: 2.2s;  background: var(--restored); }
+.p7  { width: 3px;  height: 3px;  left: 70%; animation-duration: 10s; animation-delay: 1s;    }
+.p8  { width: 4px;  height: 4px;  left: 78%; animation-duration: 6s;  animation-delay: 0.3s;  }
+.p9  { width: 2px;  height: 2px;  left: 85%; animation-duration: 14s; animation-delay: 4s;    }
+.p10 { width: 3px;  height: 3px;  left: 15%; animation-duration: 9s;  animation-delay: 2.8s;  background: var(--restored); }
+.p11 { width: 4px;  height: 4px;  left: 90%; animation-duration: 8s;  animation-delay: 1.4s;  }
+.p12 { width: 2px;  height: 2px;  left: 55%; animation-duration: 11s; animation-delay: 5s;    }
+
+@keyframes floatUp {
+  0%   { transform: translateY(110vh) translateX(0)     scale(0); opacity: 0;   }
+  10%  { opacity: 0.7; }
+  90%  { opacity: 0.5; }
+  100% { transform: translateY(-10vh)  translateX(30px) scale(1.3); opacity: 0; }
+}
+
+/* ── HUD ────────────────────────────────────────────────────────────────────── */
+#hud {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;   /* pass-through — only interactive children need pointer-events */
+}
+
+/* Zone name — top left */
+.hud-zone-name {
+  position: absolute;
+  top: var(--hud-padding);
+  left: var(--hud-padding);
+  font-family: var(--font-title);
+  font-size: clamp(0.75rem, 1.8vw, 1rem);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--echo);
+  text-shadow: 0 0 20px rgba(200, 162, 245, 0.8);
+  transition: opacity 0.4s;
+}
+
+/* Hint text — bottom center */
+.hud-hint {
+  position: absolute;
+  bottom: var(--hud-padding);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.75rem;
+  font-weight: 300;
+  letter-spacing: 0.08em;
+  color: var(--text-primary);
+  opacity: 0.5;
+  white-space: nowrap;
+  transition: opacity 0.4s;
+}
+
+.hud-hint kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid rgba(200, 162, 245, 0.3);
+  border-radius: 3px;
+  font-family: var(--font-ui);
+  font-size: 0.7rem;
+  background: rgba(200, 162, 245, 0.08);
+  color: var(--echo);
+}
+
+/* Echo meter — bottom right */
+.hud-echo-wrap {
+  position: absolute;
+  bottom: var(--hud-padding);
+  right: var(--hud-padding);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 160px;
+}
+
+.echo-label {
+  font-size: 0.6rem;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--echo);
+  opacity: 0.7;
+}
+
+.echo-meter-track {
+  position: relative;
+  width: 100%;
+  height: 10px;
+  background: rgba(200, 162, 245, 0.1);
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.echo-meter-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 5px;
+  /* Gradient: purple void → golden restored */
+  background: linear-gradient(90deg, var(--accent) 0%, var(--echo) 50%, var(--restored) 100%);
+  background-size: 200% 100%;
+  transition: width 0.6s var(--ease-glow);
+  box-shadow: 0 0 8px rgba(200, 162, 245, 0.6);
+  animation: shimmer 2.5s linear infinite;
+}
+
+@keyframes shimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+.echo-meter-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.55rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  color: rgba(232, 223, 245, 0.9);
+  text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+}
+
+/* ── Zone Title Overlay ─────────────────────────────────────────────────────── */
+.zone-title-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: clamp(40px, 8vh, 80px);
+  pointer-events: none;
+
+  /* Hidden state */
+  opacity: 0;
+  transform: translateY(-20px);
+  transition: opacity 0.6s var(--ease-glow), transform 0.6s var(--ease-glow);
+}
+.zone-title-overlay:not(.hidden) {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.zone-title-inner {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.zone-title-eyebrow {
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--echo);
+  opacity: 0.75;
+}
+
+.zone-title-name {
+  font-family: var(--font-title);
+  font-size: clamp(1.8rem, 5vw, 3rem);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-primary);
+  text-shadow:
+    0 0 30px rgba(200, 162, 245, 0.8),
+    0 2px 4px rgba(0,0,0,0.6);
+}
+
+.zone-title-flavor {
+  font-size: 0.85rem;
+  font-weight: 300;
+  font-style: italic;
+  color: var(--text-primary);
+  opacity: 0.6;
+  max-width: 40ch;
+  margin: 0 auto;
+}
+
+/* ── Restoration Message ────────────────────────────────────────────────────── */
+.restoration-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 5, 16, 0.88);
+  backdrop-filter: blur(8px);
+
+  /* Hidden → visible transition */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 1s var(--ease-glow);
+}
+.restoration-overlay:not(.hidden) {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.restoration-inner {
+  position: relative;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: clamp(30px, 5vw, 60px);
+  max-width: min(540px, 90vw);
+  border: 1px solid rgba(245, 200, 66, 0.2);
+  border-radius: 16px;
+  background: rgba(10, 5, 16, 0.6);
+  box-shadow:
+    0 0 80px rgba(245, 200, 66, 0.15),
+    inset 0 1px 0 rgba(245, 200, 66, 0.1);
+  animation: restorationReveal 1.2s var(--ease-glow) both;
+}
+
+@keyframes restorationReveal {
+  from { transform: scale(0.88); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+/* Golden radial glow behind the card */
+.restoration-glow {
+  position: absolute;
+  inset: -60px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(245, 200, 66, 0.25) 0%, transparent 70%);
+  animation: glowPulse 2.5s ease-in-out infinite;
+  pointer-events: none;
+  z-index: -1;
+}
+
+@keyframes glowPulse {
+  0%, 100% { opacity: 0.6; transform: scale(1);   }
+  50%       { opacity: 1;   transform: scale(1.05);}
+}
+
+.restoration-eyebrow {
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--restored);
+  opacity: 0.8;
+}
+
+.restoration-title {
+  font-family: var(--font-title);
+  font-size: clamp(1.6rem, 4vw, 2.4rem);
+  font-weight: 700;
+  color: var(--restored);
+  text-shadow:
+    0 0 40px rgba(245, 200, 66, 0.9),
+    0 0 80px rgba(245, 200, 66, 0.4);
+  letter-spacing: 0.05em;
+}
+
+.restoration-body {
+  font-size: 0.9rem;
+  font-weight: 300;
+  line-height: 1.7;
+  color: var(--text-primary);
+  opacity: 0.8;
+  max-width: 36ch;
+}
+
+.restoration-continue {
+  pointer-events: auto;
+  margin-top: 10px;
+  padding: 12px 32px;
+  font-family: var(--font-title);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--void);
+  background: linear-gradient(135deg, var(--restored), #e6aa20);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  box-shadow: 0 0 20px rgba(245, 200, 66, 0.4);
+}
+.restoration-continue:hover {
+  transform: scale(1.04);
+  box-shadow: 0 0 30px rgba(245, 200, 66, 0.7);
+}
+.restoration-continue:active {
+  transform: scale(0.98);
+}
+
+/* ── Mobile Touch Controls ───────────────────────────────────────────────────── */
+.mobile-controls {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  pointer-events: none;
+}
+
+/* Show on touch devices */
+@media (hover: none) and (pointer: coarse) {
+  .mobile-controls {
+    display: flex !important;
+  }
+}
+
+.virtual-joystick {
+  position: absolute;
+  bottom: 60px;
+  left: 30px;
+  pointer-events: auto;
+}
+
+.joystick-base {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: rgba(200, 162, 245, 0.08);
+  border: 2px solid rgba(200, 162, 245, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+}
+
+.joystick-knob {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, var(--echo), var(--accent));
+  box-shadow: 0 0 16px rgba(200, 162, 245, 0.5);
+  transition: transform 0.05s;
+  pointer-events: none;
+}
+
+.look-pad {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 55%;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+/* ── Responsive Overrides ───────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .hud-hint { display: none; }
+
+  .hud-echo-wrap {
+    right: 10px;
+    bottom: 70px;
+    min-width: 120px;
+  }
+
+  .zone-title-name { font-size: 1.5rem; }
+  .restoration-inner { padding: 24px 20px; }
+}

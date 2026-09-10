@@ -1,0 +1,135 @@
+{
+  "_comment": "Zone configuration for A Gift for the Forgotten City. Loaded at runtime by game/js/world.js.",
+  "schema_version": "1.0.0",
+  "zones": [
+    {
+      "id": "sunken_library",
+      "name": "The Sunken Library",
+      "subtitle": "A civilization of scholars lost beneath the waves",
+      "lore": "Once the greatest repository of knowledge on the continent, the Grand Library of Ael-Maris sank beneath a rising sea in a single night. Its scholars never escaped — but their writings did, sealed in waterproof vaults that still hum with forgotten wisdom.",
+      "color_theme": {
+        "void": "#0a0524",
+        "restored": "#1a6b8a",
+        "accent": "#40e0d0"
+      },
+      "position": [0, 0, 0],
+      "radius": 80,
+      "echo_count": 8,
+      "required_echoes": 5,
+      "models": {
+        "main_building": "models/sunken_library/main_hall.glb",
+        "secondary_building": "models/sunken_library/scroll_tower.glb",
+        "landmark": "models/sunken_library/great_lens.glb",
+        "artifact": "models/sunken_library/knowledge_orb.glb",
+        "vegetation": "models/sunken_library/coral_growth.glb"
+      },
+      "spawn_point": [0, 2, 20],
+      "ambient_sound": "audio/ambience/deep_water.ogg",
+      "restoration_vfx": "ripple_ascend"
+    },
+    {
+      "id": "sky_nomads",
+      "name": "The Sky Nomads",
+      "subtitle": "Cloud cities that drifted away forever",
+      "lore": "The Aetheri built their homes on living cloudbanks, following seasonal winds across the sky. When the great storms came, their cloud platforms dispersed beyond the horizon — and were never found again. Only their crystalline waypoints remain, grounded and silent.",
+      "color_theme": {
+        "void": "#0a0a24",
+        "restored": "#c8d8ff",
+        "accent": "#7c9fff"
+      },
+      "position": [200, 50, 0],
+      "radius": 70,
+      "echo_count": 7,
+      "required_echoes": 5,
+      "models": {
+        "main_building": "models/sky_nomads/cloud_palace.glb",
+        "secondary_building": "models/sky_nomads/crystal_spire.glb",
+        "landmark": "models/sky_nomads/wind_altar.glb",
+        "artifact": "models/sky_nomads/navigation_compass.glb",
+        "vegetation": "models/sky_nomads/sky_bloom.glb"
+      },
+      "spawn_point": [200, 52, 20],
+      "ambient_sound": "audio/ambience/high_winds.ogg",
+      "restoration_vfx": "cloud_bloom"
+    },
+    {
+      "id": "deep_forge",
+      "name": "The Deep Forge",
+      "subtitle": "Master craftsmen swallowed by the earth",
+      "lore": "The Khal-Drun were the finest smiths the world had ever known, working metals that no modern furnace can replicate. A catastrophic vein collapse buried their underground city in a single hour. The fires they lit still burn somewhere below — but no one knows how to reach them.",
+      "color_theme": {
+        "void": "#1a0a00",
+        "restored": "#8b2500",
+        "accent": "#ff6b00"
+      },
+      "position": [-200, -20, 0],
+      "radius": 90,
+      "echo_count": 9,
+      "required_echoes": 6,
+      "models": {
+        "main_building": "models/deep_forge/forge_cathedral.glb",
+        "secondary_building": "models/deep_forge/obsidian_tower.glb",
+        "landmark": "models/deep_forge/great_anvil.glb",
+        "artifact": "models/deep_forge/soul_hammer.glb",
+        "vegetation": "models/deep_forge/lava_moss.glb"
+      },
+      "spawn_point": [-200, -18, 20],
+      "ambient_sound": "audio/ambience/deep_forge_hum.ogg",
+      "restoration_vfx": "ember_rise"
+    },
+    {
+      "id": "memory_gardens",
+      "name": "The Memory Gardens",
+      "subtitle": "Spiritual keepers whose temples were silenced",
+      "lore": "The Seren were not warriors or builders — they were listeners. Their terraced gardens were places where the living spoke to the dead. When a plague swept through in a single season, there was no one left to tend the rites, and the voices of the departed fell silent forever.",
+      "color_theme": {
+        "void": "#0a1a0a",
+        "restored": "#2d6a2d",
+        "accent": "#a8e6a8"
+      },
+      "position": [0, 0, -250],
+      "radius": 85,
+      "echo_count": 10,
+      "required_echoes": 7,
+      "models": {
+        "main_building": "models/memory_gardens/spirit_temple.glb",
+        "secondary_building": "models/memory_gardens/lantern_gate.glb",
+        "landmark": "models/memory_gardens/memory_tree.glb",
+        "artifact": "models/memory_gardens/spirit_bell.glb",
+        "vegetation": "models/memory_gardens/sacred_bloom.glb"
+      },
+      "spawn_point": [0, 2, -230],
+      "ambient_sound": "audio/ambience/forest_shrine.ogg",
+      "restoration_vfx": "petal_ascend"
+    },
+    {
+      "id": "grand_reunion",
+      "name": "The Grand Reunion",
+      "subtitle": "Where all forgotten people finally meet",
+      "lore": "No civilization built this place. It exists only in the space between memories — a convergence point that appears when enough echoes have been returned. Here, the scholars, nomads, smiths, and spirit-keepers finally see each other for the first time. Here, the Gift is given.",
+      "color_theme": {
+        "void": "#0a0510",
+        "restored": "#f5c842",
+        "accent": "#ffffff"
+      },
+      "position": [0, 0, 0],
+      "radius": 150,
+      "echo_count": 20,
+      "required_echoes": 15,
+      "unlock_requires": [
+        "sunken_library",
+        "sky_nomads",
+        "deep_forge",
+        "memory_gardens"
+      ],
+      "models": {
+        "main_building": "models/grand_reunion/unity_hall.glb",
+        "landmark": "models/grand_reunion/world_tree.glb",
+        "artifact": "models/grand_reunion/gift_monument.glb"
+      },
+      "spawn_point": [0, 5, 100],
+      "ambient_sound": "audio/ambience/grand_reunion.ogg",
+      "restoration_vfx": "light_convergence"
+    }
+  ]
+}
