@@ -12,6 +12,7 @@ Usage:
 
 import asyncio
 import json
+import mimetypes
 import os
 import time
 from pathlib import Path
@@ -26,10 +27,29 @@ import aiohttp
 
 class TripoAPIError(Exception):
     """Raised when the Tripo API returns a non-success response."""
-    def __init__(self, status: int, message: str, task_id: Optional[str] = None):
+    def __init__(
+        self,
+        status: int,
+        message: str,
+        task_id: Optional[str] = None,
+        code: Optional[int] = None,
+        suggestion: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ):
         self.status = status
         self.task_id = task_id
-        super().__init__(f"Tripo API Error {status}: {message}")
+        self.code = code
+        self.suggestion = suggestion
+        self.request_id = request_id
+        details = f"Tripo API Error {status}"
+        if code is not None:
+            details += f" (code {code})"
+        details += f": {message}"
+        if suggestion:
+            details += f"; suggestion: {suggestion}"
+        if request_id:
+            details += f"; request_id: {request_id}"
+        super().__init__(details)
 
 
 class TripoTimeoutError(Exception):
@@ -44,7 +64,7 @@ class TripoTimeoutError(Exception):
 # ---------------------------------------------------------------------------
 
 TRIPO_BASE_URL = os.environ.get("TRIPO_BASE_URL", "https://openapi.tripo3d.ai/v3")
-DEFAULT_MODEL = os.environ.get("TRIPO_MODEL_VERSION", "v3.0-20250812")
+DEFAULT_MODEL = os.environ.get("TRIPO_MODEL_VERSION", "v3.1-20260211")
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 2.0  # seconds (doubles each retry)
 
@@ -148,7 +168,10 @@ class TripoClient:
                             elif isinstance(body, dict) and "code" in body and body["code"] != 0:
                                 raise TripoAPIError(
                                     resp.status,
-                                    body.get("message", "Unknown error"),
+                                    body.get("message") or body.get("error") or "Unknown error",
+                                    code=body.get("code"),
+                                    suggestion=body.get("suggestion"),
+                                    request_id=body.get("request_id"),
                                 )
                             return body
 
@@ -159,6 +182,15 @@ class TripoClient:
                             continue
 
                         else:
+                            if isinstance(body, dict):
+                                message = body.get("message") or body.get("error") or str(body)
+                                raise TripoAPIError(
+                                    resp.status,
+                                    message,
+                                    code=body.get("code"),
+                                    suggestion=body.get("suggestion"),
+                                    request_id=body.get("request_id"),
+                                )
                             raise TripoAPIError(resp.status, str(body))
 
             except aiohttp.ClientError as e:
@@ -200,7 +232,7 @@ class TripoClient:
         self,
         task_id: str,
         poll_interval: float = 3.0,
-        timeout: int = 300,
+        timeout: int = 3000,
         show_progress: bool = True,
     ) -> dict[str, Any]:
         """
@@ -231,10 +263,25 @@ class TripoClient:
                     print(f" ✅ Done!")
                 return task
             elif status in ("failed", "cancelled"):
+                error = task.get("error")
+                if isinstance(error, dict):
+                    reason = error.get("message") or error.get("reason") or str(error)
+                    error_code = error.get("code")
+                else:
+                    reason = (
+                        task.get("message")
+                        or task.get("reason")
+                        or task.get("error_message")
+                        or "Unknown reason"
+                    )
+                    error_code = task.get("code") or task.get("error_code")
                 raise TripoAPIError(
                     0,
-                    f"Task {task_id} failed: {task.get('message', 'Unknown reason')}",
+                    f"Task {task_id} failed: {reason}",
                     task_id=task_id,
+                    code=error_code,
+                    suggestion=task.get("suggestion"),
+                    request_id=task.get("request_id"),
                 )
             elif status in ("running", "queued", "pending"):
                 if show_progress:
@@ -321,7 +368,6 @@ class TripoClient:
         payload: dict[str, Any] = {
             "model": model or DEFAULT_MODEL,
             "prompt": prompt,
-            "output_format": output_format,
             "texture": texture,
             "pbr": pbr,
         }
@@ -329,8 +375,8 @@ class TripoClient:
         # Include texture_quality only if textures are enabled
         if texture:
             if texture_quality == "fast":
-                # Tripo requirement: texture_quality 'fast' requires texture model 'v3.5-20260815'
-                payload["texture"] = "v3.5-20260815"
+                # Tripo requires the v3.5 texture model for the fast tier.
+                payload["texture_version"] = "v3.5-20260815"
                 payload["texture_quality"] = "fast"
             elif texture_quality in ("standard", "detailed", "extreme"):
                 payload["texture_quality"] = texture_quality
@@ -377,15 +423,17 @@ class TripoClient:
         session = await self._get_session()
 
         # Upload image
-        form = aiohttp.FormData()
-        form.add_field("file", open(image_path, "rb"), filename=img_path.name, content_type="image/png")
+        content_type = mimetypes.guess_type(img_path.name)[0] or "application/octet-stream"
+        with img_path.open("rb") as image_file:
+            form = aiohttp.FormData()
+            form.add_field("file", image_file, filename=img_path.name, content_type=content_type)
 
-        async with self._semaphore:
-            async with session.post(
-                f"{self.base_url}/files",
-                data=form,
-            ) as resp:
-                upload_result = await resp.json(content_type=None)
+            async with self._semaphore:
+                async with session.post(
+                    f"{self.base_url}/files",
+                    data=form,
+                ) as resp:
+                    upload_result = await resp.json(content_type=None)
 
         file_token = (
             upload_result.get("data", {}).get("file_token")
@@ -402,8 +450,7 @@ class TripoClient:
 
         payload: dict[str, Any] = {
             "model": model or DEFAULT_MODEL,
-            "file": {"type": "file_token", "file_token": file_token},
-            "output_format": output_format,
+            "input": file_token,
             "texture": texture,
             "pbr": pbr,
         }
@@ -435,8 +482,10 @@ class TripoClient:
         """
         payload = {
             "input": draft_model_task_id,
+            "model": "v2.0",
             "quad": quad,
             "face_limit": target_faces,
+            "bake": True,
         }
         return await self._request("POST", "/mesh/decimate", json=payload)
 
@@ -495,7 +544,12 @@ class TripoClient:
         return await self._request(
             "POST",
             "/animations/rig",
-            json={"input": draft_model_task_id, "model": "v2.5-20260210"},
+            json={
+                "input": draft_model_task_id,
+                "model": "v1.0-20240301",
+                "rig_type": "biped",
+                "out_format": "glb",
+            },
         )
 
     async def animate_model(
@@ -518,7 +572,11 @@ class TripoClient:
             "/animations/retarget",
             json={
                 "input": draft_model_task_id,
-                "animation": animation_preset,
+                "animation": (
+                    animation_preset
+                    if animation_preset.startswith("preset:")
+                    else f"preset:{animation_preset}"
+                ),
             },
         )
 
@@ -585,14 +643,8 @@ class TripoClient:
         # Step 3: PBR textures on retopo'd mesh
         if show_progress:
             print(f"  🎨 Baking PBR textures...")
-        pbr_task = await self.generate_pbr_textures(
-            original_model_task_id=task_id,
-            retopo_task_id=retopo_result["task_id"],
-        )
-        pbr_result = await self.wait_for_task(pbr_task["task_id"], show_progress=show_progress)
-
-        # Step 4: Download
-        path = await self.download_model(pbr_result, output_path)
+        # retopology uses bake=true, so avoid a second paid texture task.
+        path = await self.download_model(retopo_result, output_path)
         if show_progress:
             print(f"  💾 Saved: {path}")
         return path

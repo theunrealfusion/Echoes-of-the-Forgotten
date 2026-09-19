@@ -180,8 +180,8 @@ class TestTripoClientPayload(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["texture_quality"], "detailed")
 
     @patch.object(asset_generator.TripoClient, "_request")
-    async def test_text_to_3d_fast_texture_quality_pins_model(self, mock_request):
-        """texture_quality='fast' must pin texture='v3.5-20260815' to satisfy Tripo requirement."""
+    async def test_text_to_3d_fast_texture_quality_pins_texture_version(self, mock_request):
+        """texture_quality='fast' must pin texture_version, not replace texture's boolean."""
         client = asset_generator.TripoClient(api_key="dummy")
         mock_request.return_value = {"task_id": "task_123"}
 
@@ -189,7 +189,8 @@ class TestTripoClientPayload(unittest.IsolatedAsyncioTestCase):
 
         mock_request.assert_awaited_once()
         payload = mock_request.call_args[1]["json"]
-        self.assertEqual(payload["texture"], "v3.5-20260815")
+        self.assertTrue(payload["texture"])
+        self.assertEqual(payload["texture_version"], "v3.5-20260815")
         self.assertEqual(payload["texture_quality"], "fast")
 
 
