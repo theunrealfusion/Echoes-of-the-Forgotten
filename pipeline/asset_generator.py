@@ -523,7 +523,7 @@ class ForgottenCityAssetGenerator:
         """
         # Step 1 — text to 3D
         logger.info("[%s] Step 1/3 — text-to-3D", name)
-        gen_task = await client.text_to_3d(prompt, output_format="glb", pbr=True, texture_quality="high")
+        gen_task = await client.text_to_3d(prompt, output_format="glb", pbr=True, texture_quality="detailed")
         gen_result = await client.wait_for_task(gen_task["task_id"])
         model_id: str = gen_task["task_id"]
 
@@ -606,7 +606,7 @@ class ForgottenCityAssetGenerator:
         self,
         name: str,
         description: str,
-        animation_preset: str = "idle",
+        animation_preset: str = "walk",
     ) -> str:
         """Generate a rigged, animated NPC character.
 
@@ -636,7 +636,7 @@ class ForgottenCityAssetGenerator:
             # Step 1 — generate character mesh
             logger.info("[NPC:%s] Step 1/3 — text-to-3D", name)
             gen_task = await client.text_to_3d(
-                description, output_format="glb", pbr=True, texture_quality="high"
+                description, output_format="glb", pbr=True, texture_quality="detailed"
             )
             await client.wait_for_task(gen_task["task_id"])
             model_id: str = gen_task["task_id"]

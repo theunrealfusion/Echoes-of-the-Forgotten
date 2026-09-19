@@ -43,7 +43,8 @@ class TripoTimeoutError(Exception):
 # Client
 # ---------------------------------------------------------------------------
 
-TRIPO_BASE_URL = "https://openapi.tripo3d.com/v3"
+TRIPO_BASE_URL = os.environ.get("TRIPO_BASE_URL", "https://openapi.tripo3d.ai/v3")
+DEFAULT_MODEL = os.environ.get("TRIPO_MODEL_VERSION", "v3.0-20250812")
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 2.0  # seconds (doubles each retry)
 
@@ -84,7 +85,6 @@ class TripoClient:
             self._session = aiohttp.ClientSession(
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
                 },
                 timeout=timeout,
             )
@@ -129,6 +129,11 @@ class TripoClient:
         """
         session = await self._get_session()
         url = f"{self.base_url}{endpoint}"
+        
+        headers = kwargs.pop("headers", {})
+        if "Content-Type" not in headers:
+            headers["Content-Type"] = "application/json"
+        kwargs["headers"] = headers
 
         for attempt in range(MAX_RETRIES + 1):
             try:
@@ -169,6 +174,15 @@ class TripoClient:
     # ------------------------------------------------------------------
     # Task management
     # ------------------------------------------------------------------
+
+    async def get_balance(self) -> dict[str, Any]:
+        """
+        Retrieve account balance and credit status.
+
+        Returns:
+            Dict containing 'balance' and 'frozen' credit counts.
+        """
+        return await self._request("GET", "/account/balance")
 
     async def get_task(self, task_id: str) -> dict[str, Any]:
         """
@@ -280,9 +294,11 @@ class TripoClient:
         self,
         prompt: str,
         output_format: str = "glb",
+        texture: bool = True,
         pbr: bool = True,
-        texture_quality: str = "high",
+        texture_quality: str = "detailed",
         negative_prompt: str = "",
+        model: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Generate a 3D model from a text prompt.
@@ -290,19 +306,37 @@ class TripoClient:
         Args:
             prompt: Text description of the 3D asset to generate.
             output_format: Output file format ('glb', 'fbx', 'obj', 'stl', 'usdz').
-            pbr: Whether to generate PBR material maps.
-            texture_quality: Texture resolution ('low', 'medium', 'high').
+            texture: Whether to generate texture maps (default: True).
+            pbr: Whether to generate PBR material maps (forces texture=True).
+            texture_quality: Texture resolution ('standard', 'detailed', 'extreme').
             negative_prompt: Things to avoid in the generation.
+            model: Optional model version override (e.g. 'v3.0-20250812', 'v3.1-20260211').
 
         Returns:
             Task dict with task_id for polling.
         """
+        if pbr:
+            texture = True
+
         payload: dict[str, Any] = {
+            "model": model or DEFAULT_MODEL,
             "prompt": prompt,
             "output_format": output_format,
+            "texture": texture,
             "pbr": pbr,
-            "texture_quality": texture_quality,
         }
+
+        # Include texture_quality only if textures are enabled
+        if texture:
+            if texture_quality == "fast":
+                # Tripo requirement: texture_quality 'fast' requires texture model 'v3.5-20260815'
+                payload["texture"] = "v3.5-20260815"
+                payload["texture_quality"] = "fast"
+            elif texture_quality in ("standard", "detailed", "extreme"):
+                payload["texture_quality"] = texture_quality
+            elif texture_quality:
+                payload["texture_quality"] = texture_quality
+
         if negative_prompt:
             payload["negative_prompt"] = negative_prompt
 
@@ -316,15 +350,21 @@ class TripoClient:
         self,
         image_path: str,
         output_format: str = "glb",
+        texture: bool = True,
         pbr: bool = True,
+        texture_quality: str = "detailed",
+        model: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Generate a 3D model from a reference image.
 
         Args:
             image_path: Local path to the image file (PNG/JPG).
-            output_format: Output file format.
-            pbr: Whether to generate PBR textures.
+            output_format: Output file format ('glb', 'fbx', 'obj', 'stl', 'usdz').
+            texture: Whether to generate texture maps (default: True).
+            pbr: Whether to generate PBR textures (default: True).
+            texture_quality: Texture resolution ('standard', 'detailed', 'extreme').
+            model: Optional model version override.
 
         Returns:
             Task dict with task_id for polling.
@@ -342,25 +382,34 @@ class TripoClient:
 
         async with self._semaphore:
             async with session.post(
-                f"{self.base_url}/upload",
+                f"{self.base_url}/files",
                 data=form,
-                headers={"Authorization": f"Bearer {self.api_key}"},  # override Content-Type
             ) as resp:
                 upload_result = await resp.json(content_type=None)
 
         file_token = (
-            upload_result.get("data", {}).get("image_token")
+            upload_result.get("data", {}).get("file_token")
+            or upload_result.get("file_token")
+            or upload_result.get("data", {}).get("image_token")
             or upload_result.get("image_token")
         )
         if not file_token:
             raise TripoAPIError(0, f"Image upload failed: {upload_result}")
 
         # Step 2: Submit generation task
+        if pbr:
+            texture = True
+
         payload: dict[str, Any] = {
-            "file": {"type": "jpg", "file_token": file_token},
+            "model": model or DEFAULT_MODEL,
+            "file": {"type": "file_token", "file_token": file_token},
             "output_format": output_format,
+            "texture": texture,
             "pbr": pbr,
         }
+        if texture and texture_quality:
+            payload["texture_quality"] = texture_quality
+
         return await self._request("POST", "/generation/image-to-model", json=payload)
 
     # ------------------------------------------------------------------
@@ -385,11 +434,11 @@ class TripoClient:
             Task dict for the retopology operation.
         """
         payload = {
-            "draft_model_task_id": draft_model_task_id,
+            "input": draft_model_task_id,
             "quad": quad,
             "face_limit": target_faces,
         }
-        return await self._request("POST", "/geometry/retopology", json=payload)
+        return await self._request("POST", "/mesh/decimate", json=payload)
 
     async def generate_pbr_textures(
         self,
@@ -406,13 +455,12 @@ class TripoClient:
         Returns:
             Task dict for the texturing operation.
         """
+        task_to_texture = retopo_task_id or original_model_task_id
         payload: dict[str, Any] = {
-            "original_model_task_id": original_model_task_id,
+            "input": task_to_texture,
         }
-        if retopo_task_id:
-            payload["retopo_model_task_id"] = retopo_task_id
 
-        return await self._request("POST", "/texture/rebake", json=payload)
+        return await self._request("POST", "/models/texture", json=payload)
 
     async def segment_model(self, draft_model_task_id: str) -> dict[str, Any]:
         """
@@ -426,8 +474,8 @@ class TripoClient:
         """
         return await self._request(
             "POST",
-            "/segment",
-            json={"draft_model_task_id": draft_model_task_id},
+            "/mesh/segment",
+            json={"input": draft_model_task_id},
         )
 
     # ------------------------------------------------------------------
@@ -446,14 +494,14 @@ class TripoClient:
         """
         return await self._request(
             "POST",
-            "/rig",
-            json={"draft_model_task_id": draft_model_task_id},
+            "/animations/rig",
+            json={"input": draft_model_task_id, "model": "v2.5-20260210"},
         )
 
     async def animate_model(
         self,
         draft_model_task_id: str,
-        animation_preset: str = "idle",
+        animation_preset: str = "walk",
     ) -> dict[str, Any]:
         """
         Apply an animation preset to a rigged model.
@@ -467,10 +515,10 @@ class TripoClient:
         """
         return await self._request(
             "POST",
-            "/animate",
+            "/animations/retarget",
             json={
-                "draft_model_task_id": draft_model_task_id,
-                "animation_preset": animation_preset,
+                "input": draft_model_task_id,
+                "animation": animation_preset,
             },
         )
 
@@ -486,8 +534,9 @@ class TripoClient:
         """
         try:
             result = await self._request(
-                "GET",
-                f"/rig/check/{draft_model_task_id}",
+                "POST",
+                "/animations/rig-check",
+                json={"input": draft_model_task_id}
             )
             return result.get("riggable", False)
         except TripoAPIError:

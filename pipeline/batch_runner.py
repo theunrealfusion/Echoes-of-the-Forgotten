@@ -110,16 +110,35 @@ def _configure_logging(verbose: bool = False) -> None:
         logging.basicConfig(level=level, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
 
+# Configure UTF-8 encoding on Windows console if supported
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    if hasattr(sys.stderr, "reconfigure"):
+        try:
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 logger = logging.getLogger(__name__)
-console = Console() if _HAS_RICH else None
+console = Console(legacy_windows=False) if _HAS_RICH else None
 
 
 def _print(msg: str) -> None:
-    """Print via Rich console when available, else plain print."""
+    """Print via Rich console when available, with encoding fallback."""
     if console:
-        console.print(msg)
-    else:
+        try:
+            console.print(msg)
+            return
+        except Exception:
+            pass
+    try:
         print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode("ascii", errors="replace").decode("ascii"))
 
 
 # ---------------------------------------------------------------------------
@@ -212,11 +231,15 @@ def _save_manifest(
 # Command implementations
 # ---------------------------------------------------------------------------
 
-async def cmd_test_connection(api_key: str) -> int:
-    """Verify API connectivity by submitting a minimal probe request.
+async def cmd_test_connection(api_key: str, probe: bool = False) -> int:
+    """Verify API connectivity and authentication.
+
+    By default, checks account balance and active credits via GET /account/balance
+    (zero credit cost). If probe is True, also submits a lightweight generation request.
 
     Args:
         api_key: Tripo API key to validate.
+        probe: Whether to submit an actual test generation probe.
 
     Returns:
         Exit code (0 = success, 1 = failure).
@@ -224,19 +247,33 @@ async def cmd_test_connection(api_key: str) -> int:
     _print("\n[bold cyan]Testing Tripo API connection…[/bold cyan]" if _HAS_RICH else "Testing Tripo API connection…")
     try:
         async with TripoClient(api_key) as client:
-            # A lightweight prompt — deliberately kept minimal to save credits.
-            task = await client.text_to_3d(
-                "a single smooth stone cube",
-                output_format="glb",
-                pbr=False,
-                texture_quality="low",
-            )
-            task_id = task.get("task_id", "?")
+            balance_data = await client.get_balance()
+            balance = balance_data.get("balance", 0.0)
+            frozen = balance_data.get("frozen", 0.0)
             _print(
-                f"[green]✓ Connection successful.[/green]  Task ID: [dim]{task_id}[/dim]"
+                f"[green]✓ Connection & Authentication successful![/green]\n"
+                f"  Available Balance: [bold cyan]{balance:,.1f}[/bold cyan] credits "
+                f"(${balance * 0.01:,.2f} USD) | Frozen: {frozen:,.1f}"
                 if _HAS_RICH
-                else f"✓ Connection successful. Task ID: {task_id}"
+                else f"✓ Connection & Authentication successful!\n"
+                     f"  Available Balance: {balance:,.1f} credits (${balance * 0.01:,.2f} USD) | Frozen: {frozen:,.1f}"
             )
+
+            if probe:
+                _print("\n  Submitting lightweight text-to-3D probe generation...")
+                task = await client.text_to_3d(
+                    "a single smooth stone cube",
+                    output_format="glb",
+                    texture=True,
+                    pbr=True,
+                    texture_quality="standard",
+                )
+                task_id = task.get("task_id", "?")
+                _print(
+                    f"  [green]✓ Probe generation submitted.[/green] Task ID: [dim]{task_id}[/dim]"
+                    if _HAS_RICH
+                    else f"  ✓ Probe generation submitted. Task ID: {task_id}"
+                )
             return 0
     except TripoAPIError as exc:
         _print(
@@ -658,9 +695,14 @@ examples:
     )
 
     # test-connection
-    subparsers.add_parser(
+    test_conn_parser = subparsers.add_parser(
         "test-connection",
-        help="Verify TRIPO_API_KEY and API reachability.",
+        help="Verify TRIPO_API_KEY and API reachability (queries account balance).",
+    )
+    test_conn_parser.add_argument(
+        "--probe",
+        action="store_true",
+        help="Also submit a lightweight generation probe task (consumes credits).",
     )
 
     # generate-civ
@@ -741,7 +783,9 @@ def main() -> None:
     exit_code: int = 0
 
     if args.command == "test-connection":
-        exit_code = asyncio.run(cmd_test_connection(api_key))
+        exit_code = asyncio.run(
+            cmd_test_connection(api_key, probe=getattr(args, "probe", False))
+        )
 
     elif args.command == "generate-civ":
         exit_code = asyncio.run(

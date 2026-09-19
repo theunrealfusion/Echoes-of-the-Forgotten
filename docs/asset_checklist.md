@@ -3,7 +3,7 @@
 > **Project**: A Gift for the Forgotten City (Tripothon S1)  
 > **Target Window**: September 15 – October 5, 2026 (21 Days)  
 > **Status**: Production Blueprint & Generation Masterplan  
-> **API Target**: Tripo V3 OpenAPI (`https://openapi.tripo3d.com/v3`)
+> **API Target**: Tripo V3 OpenAPI (`https://openapi.tripo3d.ai/v3`)
 
 ---
 

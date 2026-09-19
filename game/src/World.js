@@ -245,33 +245,63 @@ export class World {
    * @private
    */
   _createGlobalParticleField() {
-    const COUNT = 1500;
+    const COUNT = 3000;
     const positions = new Float32Array(COUNT * 3);
     const colors    = new Float32Array(COUNT * 3);
-    const spread    = 800;
+    const sizes     = new Float32Array(COUNT);
+    const spread    = 600;
 
     for (let i = 0; i < COUNT; i++) {
-      positions[i * 3]     = (Math.random() - 0.5) * spread;
-      positions[i * 3 + 1] = (Math.random() - 0.5) * spread;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * spread;
+      // Nebula / Galaxy distribution
+      const radius = (Math.random() * Math.random()) * spread;
+      const angle = Math.random() * Math.PI * 2;
+      const height = (Math.random() - 0.5) * (spread * 0.3) * (1.0 - radius/spread);
 
-      // Subtle purple tint with variation
-      colors[i * 3]     = 0.3 + Math.random() * 0.3;
-      colors[i * 3 + 1] = 0.1 + Math.random() * 0.15;
-      colors[i * 3 + 2] = 0.5 + Math.random() * 0.4;
+      positions[i * 3]     = Math.cos(angle) * radius;
+      positions[i * 3 + 1] = height;
+      positions[i * 3 + 2] = Math.sin(angle) * radius;
+
+      // Magical cosmic colors
+      colors[i * 3]     = 0.4 + Math.random() * 0.6; // R
+      colors[i * 3 + 1] = 0.2 + Math.random() * 0.4; // G
+      colors[i * 3 + 2] = 0.6 + Math.random() * 0.4; // B
+      
+      sizes[i] = Math.random() * 2.0;
     }
 
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('color',    new THREE.BufferAttribute(colors,    3));
+    geo.setAttribute('size',     new THREE.BufferAttribute(sizes,     1));
 
-    const mat = new THREE.PointsMaterial({
-      size:         0.8,
-      vertexColors: true,
-      transparent:  true,
-      opacity:      0.4,
-      sizeAttenuation: true,
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { u_time: { value: 0.0 } },
+      vertexShader: `
+        uniform float u_time;
+        attribute float size;
+        varying vec3 vColor;
+        void main() {
+          vColor = color;
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = size * (300.0 / -mvPosition.z) * (0.5 + 0.5 * sin(u_time * 2.0 + position.x));
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vColor;
+        void main() {
+          float dist = length(gl_PointCoord - vec2(0.5));
+          if (dist > 0.5) discard;
+          float alpha = (0.5 - dist) * 2.0;
+          gl_FragColor = vec4(vColor, alpha * 0.6);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
     });
+
+    this._animatedMaterials.push(mat);
 
     const pts = new THREE.Points(geo, mat);
     pts.name  = 'void_field';
@@ -306,10 +336,10 @@ export class World {
     const [cx, cy, cz] = cfg.position;
     group.position.set(cx, cy, cz);
 
-    // Subtle dark circular zone pedestal to anchor buildings in the void
-    const pedestalGeo = new THREE.CylinderGeometry(cfg.radius * 0.85, cfg.radius * 0.9, 1.5, 32);
-    pedestalGeo.translate(0, -0.75, 0);
-    const pedestalMat = this._makeVoidShaderMaterial(new THREE.Color(cfg.color_theme).getHex());
+    // Vast ethereal grid floor
+    const pedestalGeo = new THREE.PlaneGeometry(cfg.radius * 2.5, cfg.radius * 2.5, 64, 64);
+    pedestalGeo.rotateX(-Math.PI / 2);
+    const pedestalMat = this._makeFloorShaderMaterial(new THREE.Color(cfg.color_theme).getHex(), cfg.radius);
     const pedestalMesh = new THREE.Mesh(pedestalGeo, pedestalMat);
     pedestalMesh.name = `pedestal_${zoneId}`;
     group.add(pedestalMesh);
@@ -467,73 +497,94 @@ export class World {
     let geo;
     switch (style) {
       case 'tower':
-        geo = new THREE.CylinderGeometry(1.2, 2.0, 14, 8);
-        geo.translate(0, 7, 0);
+        geo = new THREE.OctahedronGeometry(1.5, 0);
+        geo.scale(1, 6, 1);
+        geo.translate(0, 9, 0);
+        
+        const ringGeo = new THREE.TorusGeometry(3.5, 0.15, 8, 32);
+        ringGeo.rotateX(Math.PI / 2);
+        ringGeo.translate(0, 5, 0);
+        const ringMesh = new THREE.Mesh(ringGeo, mat);
+        group.add(ringMesh);
         break;
       case 'dome':
-        geo = new THREE.SphereGeometry(5, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+        geo = new THREE.IcosahedronGeometry(4, 1);
+        geo.translate(0, 2, 0);
+        
+        for(let i=0; i<3; i++) {
+           const orb = new THREE.OctahedronGeometry(0.8, 0);
+           const angle = (i/3) * Math.PI * 2;
+           orb.translate(Math.cos(angle)*6, 4, Math.sin(angle)*6);
+           group.add(new THREE.Mesh(orb, mat));
+        }
         break;
       case 'arch': {
-        // Arch approximation: two pillars + lintel box with bases aligned
-        const pillar = new THREE.BoxGeometry(1, 8, 1);
-        pillar.translate(0, 4, 0);
-        const lintel = new THREE.BoxGeometry(6, 1, 1);
-        lintel.translate(0, 8.5, 0);
-        const mL = new THREE.Mesh(pillar, mat); mL.position.set(-2.5, 0, 0);
-        const mR = new THREE.Mesh(pillar, mat); mR.position.set( 2.5, 0, 0);
-        const mT = new THREE.Mesh(lintel, mat); mT.position.set(0, 0, 0);
-        group.add(mL, mR, mT);
-        return group;
+        geo = new THREE.BoxGeometry(1.5, 12, 2);
+        geo.translate(-4, 6, 0);
+        geo.rotateZ(0.1);
+        
+        const pillar2 = new THREE.BoxGeometry(1.5, 12, 2);
+        pillar2.translate(4, 6, 0);
+        pillar2.rotateZ(-0.1);
+        
+        const lintel = new THREE.OctahedronGeometry(2, 0);
+        lintel.scale(4, 1, 1);
+        lintel.translate(0, 11, 0);
+        
+        group.add(new THREE.Mesh(pillar2, mat));
+        group.add(new THREE.Mesh(lintel, mat));
+        break;
       }
       case 'cluster': {
-        // Small cluster of boxes with bases aligned
-        for (let k = 0; k < 4; k++) {
-          const w = 1 + Math.random() * 2;
-          const h = 2 + Math.random() * 6;
-          const d = 1 + Math.random() * 2;
-          const cg = new THREE.BoxGeometry(w, h, d);
-          cg.translate(0, h / 2, 0);
-          const cm = new THREE.Mesh(cg, mat);
-          cm.position.set((Math.random() - 0.5) * 6, 0, (Math.random() - 0.5) * 6);
-          group.add(cm);
+        const coreGeo = new THREE.OctahedronGeometry(2.5, 0);
+        coreGeo.translate(0, 3, 0);
+        group.add(new THREE.Mesh(coreGeo, mat));
+        
+        for (let k = 0; k < 5; k++) {
+          const s = 0.5 + Math.random() * 1.5;
+          const cg = new THREE.OctahedronGeometry(s, 0);
+          cg.translate(
+             (Math.random() - 0.5) * 8, 
+             s + Math.random() * 5, 
+             (Math.random() - 0.5) * 8
+          );
+          group.add(new THREE.Mesh(cg, mat));
         }
-        return group;
+        return group; 
       }
       case 'slab':
       default:
-        geo = new THREE.BoxGeometry(8, 5, 4);
-        geo.translate(0, 2.5, 0);
+        geo = new THREE.BoxGeometry(3, 8, 3);
+        geo.translate(0, 4, 0);
+        const diamond = new THREE.OctahedronGeometry(1.5, 0);
+        diamond.translate(0, 10, 0);
+        group.add(new THREE.Mesh(diamond, mat));
         break;
     }
 
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.castShadow = false;
-    group.add(mesh);
+    if (geo) {
+       const mesh = new THREE.Mesh(geo, mat);
+       mesh.castShadow = false;
+       group.add(mesh);
+    }
     return group;
   }
 
-  /**
-   * Creates the void wireframe+glow ShaderMaterial.
-   * Registers material in _animatedMaterials for high-performance tick updates.
-   * @param {string|number} color  - hex colour integer or string
-   * @returns {THREE.ShaderMaterial}
-   * @private
-   */
   _makeVoidShaderMaterial(color) {
     const c = new THREE.Color(color);
     const mat = new THREE.ShaderMaterial({
       uniforms: {
         u_color:    { value: c },
-        u_progress: { value: 0.0 },   // 0 = full void wireframe, 1 = solid
+        u_progress: { value: 0.0 },
         u_time:     { value: 0.0 },
       },
-      vertexShader: /* glsl */`
+      vertexShader: `
         uniform float u_time;
         uniform float u_progress;
         varying vec3 v_position;
         varying vec3 v_normal;
+        varying vec3 v_worldPosition;
 
-        // Cheap pseudo-random
         float hash(vec3 p) {
           return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
         }
@@ -541,41 +592,43 @@ export class World {
         void main() {
           v_position = position;
           v_normal   = normal;
+          
+          vec4 worldPos = modelMatrix * vec4(position, 1.0);
+          v_worldPosition = worldPos.xyz;
 
-          // Void-state: slight noise displacement
-          float noise = (hash(position + u_time * 0.3) - 0.5) * (1.0 - u_progress) * 0.3;
+          float noise = (hash(position + u_time * 0.3) - 0.5) * (1.0 - u_progress) * 0.15;
           vec3  displaced = position + normal * noise;
 
           gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
         }
       `,
-      fragmentShader: /* glsl */`
+      fragmentShader: `
         uniform vec3  u_color;
         uniform float u_progress;
         uniform float u_time;
         varying vec3  v_position;
         varying vec3  v_normal;
-
-        // Edge detection approximation via derivative
-        float wireframe(vec3 pos) {
-          vec3 fw = abs(dFdx(pos)) + abs(dFdy(pos));
-          vec3 val = smoothstep(vec3(0.0), fw * 1.5, fract(pos));
-          return min(val.x, min(val.y, val.z));
-        }
+        varying vec3  v_worldPosition;
 
         void main() {
-          float edge   = 1.0 - wireframe(v_position);
-          float pulse  = 0.5 + 0.5 * sin(u_time * 2.0 + v_position.y);
-          float voidM  = edge * pulse * (1.0 - u_progress);
-          float solidM = u_progress;
+          vec3 viewDirection = normalize(cameraPosition - v_worldPosition);
+          float fresnelTerm = dot(viewDirection, normalize(v_normal));
+          fresnelTerm = clamp(1.0 - abs(fresnelTerm), 0.0, 1.0);
+          float fresnelGlow = pow(fresnelTerm, 2.0);
+          
+          float scanline = sin(v_worldPosition.y * 3.0 - u_time * 2.0) * 0.5 + 0.5;
+          scanline = pow(scanline, 3.0);
 
-          vec3 voidColor    = u_color * (0.8 + 0.4 * pulse);
-          vec3 solidColor   = mix(u_color * 0.3, vec3(0.85, 0.8, 0.7), u_progress);
-
+          float voidAlpha = fresnelGlow * 0.8 + scanline * 0.3 + 0.1;
+          vec3 voidColor = u_color * (1.0 + fresnelGlow * 2.0 + scanline);
+          
+          vec3 solidColor = mix(vec3(0.08, 0.08, 0.12), vec3(0.9, 0.75, 0.3), fresnelGlow * 0.6 + 0.2);
+          float solidAlpha = 1.0;
+          
           vec3 finalColor = mix(voidColor, solidColor, u_progress);
-          float alpha     = mix(voidM, 1.0, u_progress);
-
-          gl_FragColor = vec4(finalColor, max(alpha, 0.05));
+          float finalAlpha = mix(voidAlpha, solidAlpha, u_progress);
+          
+          gl_FragColor = vec4(finalColor, min(finalAlpha, 1.0));
         }
       `,
       transparent:   true,
@@ -583,6 +636,61 @@ export class World {
       depthWrite:    false,
     });
 
+    this._animatedMaterials.push(mat);
+    return mat;
+  }
+
+  _makeFloorShaderMaterial(color, radius) {
+    const c = new THREE.Color(color);
+    const mat = new THREE.ShaderMaterial({
+      uniforms: {
+        u_color:    { value: c },
+        u_progress: { value: 0.0 },
+        u_time:     { value: 0.0 },
+        u_radius:   { value: radius }
+      },
+      vertexShader: `
+        uniform float u_time;
+        uniform float u_progress;
+        varying vec3 v_position;
+
+        void main() {
+          v_position = position;
+          vec3 pos = position;
+          pos.z += sin(pos.x * 0.1 + u_time * 0.5) * 2.0 * (1.0 - u_progress);
+          pos.y += cos(pos.x * 0.1 + u_time * 0.5) * 1.5 * (1.0 - u_progress);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3  u_color;
+        uniform float u_progress;
+        uniform float u_radius;
+        varying vec3  v_position;
+
+        void main() {
+          float dist = length(v_position.xy);
+          float fade = 1.0 - smoothstep(u_radius * 0.4, u_radius * 1.2, dist);
+
+          vec2 grid = abs(fract(v_position.xy * 0.2) - 0.5);
+          float line = smoothstep(0.45, 0.5, max(grid.x, grid.y));
+          
+          float voidAlpha = line * fade * 0.5;
+          vec3 voidColor = u_color * 2.0;
+
+          float solidAlpha = fade * 0.8;
+          vec3 solidColor = mix(vec3(0.05, 0.05, 0.08), vec3(0.8, 0.7, 0.2), line * 0.2);
+
+          vec3 finalColor = mix(voidColor, solidColor, u_progress);
+          float finalAlpha = mix(voidAlpha, solidAlpha, u_progress);
+          
+          gl_FragColor = vec4(finalColor, finalAlpha);
+        }
+      `,
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
     this._animatedMaterials.push(mat);
     return mat;
   }
