@@ -523,7 +523,7 @@ class ForgottenCityAssetGenerator:
         """
         # Step 1 — text to 3D
         logger.info("[%s] Step 1/3 — text-to-3D", name)
-        gen_task = await client.text_to_3d(prompt, output_format="glb", pbr=True, texture_quality="high")
+        gen_task = await client.text_to_3d(prompt, output_format="glb", pbr=True, texture_quality="detailed")
         gen_result = await client.wait_for_task(gen_task["task_id"])
         model_id: str = gen_task["task_id"]
 
@@ -534,10 +534,8 @@ class ForgottenCityAssetGenerator:
             retopo_result = await client.wait_for_task(retopo_task["task_id"])
             model_id = retopo_task["task_id"]
 
-            # Step 3 — PBR texturing on optimised mesh
-            logger.info("[%s] Step 3/3 — PBR texturing", name)
-            pbr_task = await client.generate_pbr_textures(model_id)
-            final_result = await client.wait_for_task(pbr_task["task_id"])
+            # Retopology uses bake=true and already rebakes the existing textures.
+            final_result = retopo_result
         else:
             final_result = gen_result
 
@@ -586,13 +584,11 @@ class ForgottenCityAssetGenerator:
                 # Step 2 — retopology
                 logger.info("[%s] Step 2/3 — retopology", name)
                 retopo_task = await client.retopologize(model_id, quad=True, target_faces=5000)
-                await client.wait_for_task(retopo_task["task_id"])
+                retopo_result = await client.wait_for_task(retopo_task["task_id"])
                 model_id = retopo_task["task_id"]
 
-                # Step 3 — PBR texturing
-                logger.info("[%s] Step 3/3 — PBR texturing", name)
-                pbr_task = await client.generate_pbr_textures(model_id)
-                final_result = await client.wait_for_task(pbr_task["task_id"])
+                # Retopology uses bake=true and already includes the texture bake.
+                final_result = retopo_result
             else:
                 final_result = gen_result
 
@@ -606,7 +602,7 @@ class ForgottenCityAssetGenerator:
         self,
         name: str,
         description: str,
-        animation_preset: str = "idle",
+        animation_preset: str = "walk",
     ) -> str:
         """Generate a rigged, animated NPC character.
 
@@ -636,7 +632,7 @@ class ForgottenCityAssetGenerator:
             # Step 1 — generate character mesh
             logger.info("[NPC:%s] Step 1/3 — text-to-3D", name)
             gen_task = await client.text_to_3d(
-                description, output_format="glb", pbr=True, texture_quality="high"
+                description, output_format="glb", pbr=True, texture_quality="detailed"
             )
             await client.wait_for_task(gen_task["task_id"])
             model_id: str = gen_task["task_id"]

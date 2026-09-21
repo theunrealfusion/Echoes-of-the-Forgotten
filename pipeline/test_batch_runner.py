@@ -125,5 +125,74 @@ class TestDryRunBehavior(unittest.TestCase):
             asset_generator.CIVILIZATION_ASSETS["sunken_library"]["main_building"]["prompt"] = original_prompt
 
 
+from unittest.mock import AsyncMock, patch
+
+
+class TestTestConnection(unittest.IsolatedAsyncioTestCase):
+    """Test suite for cmd_test_connection command handler."""
+
+    @patch("pipeline.batch_runner.TripoClient")
+    async def test_cmd_test_connection_success(self, mock_client_cls):
+        """cmd_test_connection should query get_balance and return 0 on success."""
+        from pipeline.batch_runner import cmd_test_connection
+
+        mock_instance = mock_client_cls.return_value
+        mock_instance.__aenter__.return_value = mock_instance
+        mock_instance.get_balance = AsyncMock(return_value={"balance": 23080.0, "frozen": 0.0})
+
+        exit_code = await cmd_test_connection("fake-api-key")
+        self.assertEqual(exit_code, 0)
+        mock_instance.get_balance.assert_awaited_once()
+
+    @patch("pipeline.batch_runner.TripoClient")
+    async def test_cmd_test_connection_api_error(self, mock_client_cls):
+        """cmd_test_connection should return 1 on TripoAPIError."""
+        from pipeline.batch_runner import cmd_test_connection
+        from pipeline.tripo_client import TripoAPIError
+
+        mock_instance = mock_client_cls.return_value
+        mock_instance.__aenter__.return_value = mock_instance
+        mock_instance.get_balance = AsyncMock(side_effect=TripoAPIError(401, "Invalid API key"))
+
+        exit_code = await cmd_test_connection("bad-api-key")
+        self.assertEqual(exit_code, 1)
+
+
+class TestTripoClientPayload(unittest.IsolatedAsyncioTestCase):
+    """Test suite for TripoClient request payload construction."""
+
+    @patch.object(asset_generator.TripoClient, "_request")
+    async def test_text_to_3d_payload_structure(self, mock_request):
+        """text_to_3d should construct valid Tripo V3 payload with texture and pbr flags."""
+        client = asset_generator.TripoClient(api_key="dummy")
+        mock_request.return_value = {"task_id": "task_123"}
+
+        await client.text_to_3d("a stone cube", pbr=True, texture_quality="detailed")
+
+        mock_request.assert_awaited_once()
+        args, kwargs = mock_request.call_args
+        self.assertEqual(args[0], "POST")
+        self.assertEqual(args[1], "/generation/text-to-model")
+        payload = kwargs["json"]
+        self.assertEqual(payload["prompt"], "a stone cube")
+        self.assertTrue(payload["texture"])
+        self.assertTrue(payload["pbr"])
+        self.assertEqual(payload["texture_quality"], "detailed")
+
+    @patch.object(asset_generator.TripoClient, "_request")
+    async def test_text_to_3d_fast_texture_quality_pins_texture_version(self, mock_request):
+        """texture_quality='fast' must pin texture_version, not replace texture's boolean."""
+        client = asset_generator.TripoClient(api_key="dummy")
+        mock_request.return_value = {"task_id": "task_123"}
+
+        await client.text_to_3d("a stone cube", texture_quality="fast")
+
+        mock_request.assert_awaited_once()
+        payload = mock_request.call_args[1]["json"]
+        self.assertTrue(payload["texture"])
+        self.assertEqual(payload["texture_version"], "v3.5-20260815")
+        self.assertEqual(payload["texture_quality"], "fast")
+
+
 if __name__ == "__main__":
     unittest.main()
