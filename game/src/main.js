@@ -166,6 +166,23 @@ class GameEngine {
         this.audio.unlock();
         this._hideRestorationMessage();
       });
+
+      // Wire number keys 1-4 for quick zone teleportation
+      window.addEventListener('keydown', (e) => {
+        const zoneMap = {
+          'Digit1': 'sunken_library',
+          'Digit2': 'sky_nomads',
+          'Digit3': 'deep_forge',
+          'Digit4': 'memory_gardens',
+          'Numpad1': 'sunken_library',
+          'Numpad2': 'sky_nomads',
+          'Numpad3': 'deep_forge',
+          'Numpad4': 'memory_gardens',
+        };
+        if (zoneMap[e.code]) {
+          this.switchZone(zoneMap[e.code]);
+        }
+      });
     } catch (err) {
       console.error('[GameEngine] Initialisation failed:', err);
       this._showError(err);
@@ -296,7 +313,42 @@ class GameEngine {
 
   _hideRestorationMessage() {
     restoreMsg.classList.add('hidden');
-    hintText.textContent = 'Seek the next zone — more echoes await.';
+    hintText.innerHTML = 'WASD to move • Keys <kbd>1</kbd>-<kbd>4</kbd> switch zones • ESC to release cursor';
+  }
+
+  /**
+   * Switches active zone, teleports the player, and updates bounds & HUD.
+   * @param {string} zoneId
+   */
+  switchZone(zoneId) {
+    if (!this.world || !this.player) return;
+    const zoneData = this.world.getZoneData(zoneId);
+    if (!zoneData) return;
+
+    this.currentZoneId = zoneId;
+
+    // Teleport player near zone center
+    const [x, y, z] = zoneData.position;
+    this.player.setPosition([x, y + 2.0, z + 20]);
+    this.player.setZoneBounds(new THREE.Vector3(...zoneData.position), zoneData.radius);
+
+    // Initialize echoes for this zone if not already spawned
+    if (!this.echoSystem.echoOrbs.has(zoneId)) {
+      this.echoSystem.initZone(zoneId, zoneData);
+    }
+
+    // Update HUD
+    const collected = this.echoSystem.collectedCounts.get(zoneId) ?? 0;
+    this._updateHud(collected, zoneData.echo_count);
+    this._showZoneTitle(zoneData);
+
+    // Adjust audio ambient
+    const progress = this.echoSystem.getRestorationProgress(zoneId);
+    if (progress >= 1.0) {
+      this.audio.playAmbient('restored');
+    } else {
+      this.audio.playAmbient('void');
+    }
   }
 
   // ── Loading screen helpers ────────────────────────────────────────────────
