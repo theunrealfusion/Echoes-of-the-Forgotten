@@ -15,10 +15,6 @@
  */
 
 import * as THREE from 'three';
-import { EffectComposer }   from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass }       from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass }  from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { OutputPass }       from 'three/addons/postprocessing/OutputPass.js';
 import { VRButton }         from 'three/addons/webxr/VRButton.js';
 
 import { World }              from './World.js';
@@ -65,7 +61,7 @@ class GameEngine {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled  = false; // Optimized: no shadow maps needed in void, reduces CPU overhead
     this.renderer.toneMapping        = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.2;
+    this.renderer.toneMappingExposure = 1.0; // Balanced exposure to prevent blowout
     this.renderer.outputColorSpace   = THREE.SRGBColorSpace;
     this.renderer.xr.enabled         = true; // WebXR & PICO VR support
 
@@ -93,21 +89,24 @@ class GameEngine {
     // ── Clock ─────────────────────────────────────────────────────────────────
     this.clock = new THREE.Clock();
 
-    // ── Post-processing ───────────────────────────────────────────────────────
-    this._initComposer();
-
     // ── Sub-systems (constructed but NOT yet initialised) ─────────────────────
-    this.world       = new World(this.scene, '../assets/manifests/zones.json');
+    this.world       = new World(this.scene, 'assets/manifests/zones.json');
     this.player      = new Player(this.camera, this.renderer.domElement);
     this.echoSystem  = new EchoSystem(this.scene, this.camera, this.world);
     this.restoration = new RestorationSystem(this.scene);
     this.audio       = new AudioSystem();
 
     // ── WebXR VRButton ────────────────────────────────────────────────────────
-    const vrBtn = VRButton.createButton(this.renderer);
-    vrBtn.id = 'VRButton';
-    vrBtn.addEventListener('click', () => this.audio.unlock(), { passive: true });
-    document.body.appendChild(vrBtn);
+    if ('xr' in navigator) {
+      navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
+        if (supported) {
+          const vrBtn = VRButton.createButton(this.renderer);
+          vrBtn.id = 'VRButton';
+          vrBtn.addEventListener('click', () => this.audio.unlock(), { passive: true });
+          document.body.appendChild(vrBtn);
+        }
+      }).catch(() => {});
+    }
 
     // Canvas click unlocks audio context
     canvas.addEventListener('click', () => this.audio.unlock(), { passive: true });
@@ -120,34 +119,6 @@ class GameEngine {
     this._boundResize    = this.onResize.bind(this);
 
     window.addEventListener('resize', this._boundResize);
-  }
-
-  // ── Post-processing setup ──────────────────────────────────────────────────
-
-  /**
-   * Creates an EffectComposer with:
-   *   1. RenderPass  — scene render
-   *   2. UnrealBloomPass — atmospheric void glow (purple bloom, 0.5x res for 60fps)
-   *   3. OutputPass  — gamma-correct final output
-   * @private
-   */
-  _initComposer() {
-    const size = new THREE.Vector2(
-      Math.floor(window.innerWidth / 2),
-      Math.floor(window.innerHeight / 2),
-    );
-
-    this.composer = new EffectComposer(this.renderer);
-    this.composer.addPass(new RenderPass(this.scene, this.camera));
-
-    this.bloomPass = new UnrealBloomPass(
-      size,
-      0.9,   // strength  — visible but not overwhelming
-      0.4,   // radius
-      0.75,  // threshold — only bright void-glow elements bloom
-    );
-    this.composer.addPass(this.bloomPass);
-    this.composer.addPass(new OutputPass());
   }
 
   // ── Initialisation ────────────────────────────────────────────────────────
@@ -194,6 +165,23 @@ class GameEngine {
       restoreContinue.addEventListener('click', () => {
         this.audio.unlock();
         this._hideRestorationMessage();
+      });
+
+      // Wire number keys 1-4 for quick zone teleportation
+      window.addEventListener('keydown', (e) => {
+        const zoneMap = {
+          'Digit1': 'sunken_library',
+          'Digit2': 'sky_nomads',
+          'Digit3': 'deep_forge',
+          'Digit4': 'memory_gardens',
+          'Numpad1': 'sunken_library',
+          'Numpad2': 'sky_nomads',
+          'Numpad3': 'deep_forge',
+          'Numpad4': 'memory_gardens',
+        };
+        if (zoneMap[e.code]) {
+          this.switchZone(zoneMap[e.code]);
+        }
       });
     } catch (err) {
       console.error('[GameEngine] Initialisation failed:', err);
@@ -257,11 +245,7 @@ class GameEngine {
     const delta = this.clock.getDelta();
     this.update(delta);
 
-    if (this.renderer.xr.isPresenting) {
-      this.renderer.render(this.scene, this.camera);
-    } else {
-      this.composer.render();
-    }
+    this.renderer.render(this.scene, this.camera);
   }
 
   // ── Resize handler ────────────────────────────────────────────────────────
@@ -277,8 +261,6 @@ class GameEngine {
     this.camera.updateProjectionMatrix();
 
     this.renderer.setSize(w, h);
-    this.composer.setSize(w, h);
-    this.bloomPass.resolution.set(Math.floor(w / 2), Math.floor(h / 2));
   }
 
   // ── Zone restoration trigger ───────────────────────────────────────────────
@@ -331,7 +313,42 @@ class GameEngine {
 
   _hideRestorationMessage() {
     restoreMsg.classList.add('hidden');
-    hintText.textContent = 'Seek the next zone — more echoes await.';
+    hintText.innerHTML = 'WASD to move • Keys <kbd>1</kbd>-<kbd>4</kbd> switch zones • ESC to release cursor';
+  }
+
+  /**
+   * Switches active zone, teleports the player, and updates bounds & HUD.
+   * @param {string} zoneId
+   */
+  switchZone(zoneId) {
+    if (!this.world || !this.player) return;
+    const zoneData = this.world.getZoneData(zoneId);
+    if (!zoneData) return;
+
+    this.currentZoneId = zoneId;
+
+    // Teleport player near zone center
+    const [x, y, z] = zoneData.position;
+    this.player.setPosition([x, y + 2.0, z + 20]);
+    this.player.setZoneBounds(new THREE.Vector3(...zoneData.position), zoneData.radius);
+
+    // Initialize echoes for this zone if not already spawned
+    if (!this.echoSystem.echoOrbs.has(zoneId)) {
+      this.echoSystem.initZone(zoneId, zoneData);
+    }
+
+    // Update HUD
+    const collected = this.echoSystem.collectedCounts.get(zoneId) ?? 0;
+    this._updateHud(collected, zoneData.echo_count);
+    this._showZoneTitle(zoneData);
+
+    // Adjust audio ambient
+    const progress = this.echoSystem.getRestorationProgress(zoneId);
+    if (progress >= 1.0) {
+      this.audio.playAmbient('restored');
+    } else {
+      this.audio.playAmbient('void');
+    }
   }
 
   // ── Loading screen helpers ────────────────────────────────────────────────

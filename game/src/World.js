@@ -11,6 +11,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Zone configuration constants
@@ -112,6 +113,8 @@ export const ZONE_CONFIGS = {
       'models/grand_reunion/unity_hall.glb',
       'models/grand_reunion/world_tree.glb',
       'models/grand_reunion/gift_monument.glb',
+      'models/grand_reunion/ceremonial_arch.glb',
+      'models/grand_reunion/harmonic_flora.glb',
     ],
   },
 };
@@ -131,7 +134,7 @@ export class World {
    * @param {THREE.Scene}  scene
    * @param {string}       [tripoManifestPath]  - Path to asset manifest JSON
    */
-  constructor(scene, tripoManifestPath = '../assets/manifests/zones.json') {
+  constructor(scene, tripoManifestPath = 'assets/manifests/zones.json') {
     /** @type {THREE.Scene} */
     this.scene = scene;
 
@@ -140,6 +143,9 @@ export class World {
 
     /** @type {GLTFLoader} */
     this.loader = new GLTFLoader();
+
+    /** @type {FBXLoader} */
+    this.fbxLoader = new FBXLoader();
 
     /** @type {Record<string, ZoneConfig>} */
     this.zoneConfigs = JSON.parse(JSON.stringify(ZONE_CONFIGS));
@@ -177,8 +183,8 @@ export class World {
     /** @type {THREE.FogExp2 | null} */
     this.fog = null;
 
-    // Void ambient light — very dim, colour-tinted
-    this._ambientLight = new THREE.AmbientLight(0x1a0830, 0.4);
+    // Void ambient light — balanced, natural illumination
+    this._ambientLight = new THREE.AmbientLight(0x403850, 0.85);
     scene.add(this._ambientLight);
   }
 
@@ -188,9 +194,17 @@ export class World {
    * @returns {Promise<void>}
    */
   async loadManifest(path = this.manifestPath) {
-    try {
-      const resp = await fetch(path);
-      if (resp.ok) {
+    const candidatePaths = [
+      path,
+      'assets/manifests/zones.json',
+      '../assets/manifests/zones.json',
+      '/assets/manifests/zones.json',
+    ];
+
+    for (const p of candidatePaths) {
+      try {
+        const resp = await fetch(p);
+        if (!resp.ok) continue;
         const data = await resp.json();
         if (data && Array.isArray(data.zones)) {
           for (const z of data.zones) {
@@ -207,10 +221,11 @@ export class World {
               model_files: z.models ? Object.values(z.models) : (ZONE_CONFIGS[z.id]?.model_files ?? []),
             };
           }
+          return;
         }
+      } catch (_) {
+        // Try next candidate
       }
-    } catch (_) {
-      // Offline / fallback to static ZONE_CONFIGS
     }
   }
 
@@ -221,52 +236,59 @@ export class World {
    * a directional "star" light, and a field of floating ambient particles.
    */
   createVoidEnvironment() {
-    // Deep purple-black exponential fog
-    this.fog = new THREE.FogExp2(0x05020d, 0.008);
+    // Deep rich void fog — clear enough to view buildings at distance
+    this.fog = new THREE.FogExp2(0x06030e, 0.005);
     this.scene.fog = this.fog;
-    this.scene.background = new THREE.Color(0x05020d);
+    this.scene.background = new THREE.Color(0x06030e);
 
-    // Dim hemisphere light — sky slightly lighter than ground
-    const hemi = new THREE.HemisphereLight(0x200840, 0x080310, 0.3);
+    // Balanced ambient light so models and architecture are clearly readable
+    this._ambientLight = new THREE.AmbientLight(0x403850, 0.85);
+    this.scene.add(this._ambientLight);
+
+    // Soft sky-to-ground contrast
+    const hemi = new THREE.HemisphereLight(0x6a6080, 0x1a1525, 0.5);
     this.scene.add(hemi);
 
-    // Faint directional "starlight"
-    const star = new THREE.DirectionalLight(0xc8a2f5, 0.5);
-    star.position.set(0.3, 1, 0.5).normalize();
-    star.castShadow = false;
-    this.scene.add(star);
+    // Key directional light to sculpt 3D models with clean highlights and depth
+    const keyLight = new THREE.DirectionalLight(0xfff2df, 1.5);
+    keyLight.position.set(45, 80, 50);
+    this.scene.add(keyLight);
+
+    // Soft cool directional fill light from opposite angle
+    const fillLight = new THREE.DirectionalLight(0x7c9fff, 0.6);
+    fillLight.position.set(-45, 50, -50);
+    this.scene.add(fillLight);
 
     // Ambient void particle field
     this._createGlobalParticleField();
   }
 
   /**
-   * Creates a large field of slowly drifting void particles for atmosphere.
+   * Creates a gentle field of floating cosmic dust particles.
    * @private
    */
   _createGlobalParticleField() {
-    const COUNT = 3000;
+    const COUNT = 1200;
     const positions = new Float32Array(COUNT * 3);
     const colors    = new Float32Array(COUNT * 3);
     const sizes     = new Float32Array(COUNT);
-    const spread    = 600;
+    const spread    = 500;
 
     for (let i = 0; i < COUNT; i++) {
-      // Nebula / Galaxy distribution
       const radius = (Math.random() * Math.random()) * spread;
       const angle = Math.random() * Math.PI * 2;
-      const height = (Math.random() - 0.5) * (spread * 0.3) * (1.0 - radius/spread);
+      const height = (Math.random() - 0.5) * (spread * 0.25) * (1.0 - radius / spread);
 
       positions[i * 3]     = Math.cos(angle) * radius;
       positions[i * 3 + 1] = height;
       positions[i * 3 + 2] = Math.sin(angle) * radius;
 
-      // Magical cosmic colors
-      colors[i * 3]     = 0.4 + Math.random() * 0.6; // R
-      colors[i * 3 + 1] = 0.2 + Math.random() * 0.4; // G
-      colors[i * 3 + 2] = 0.6 + Math.random() * 0.4; // B
+      // Soft magical colors (controlled luminance)
+      colors[i * 3]     = 0.35 + Math.random() * 0.3; // R
+      colors[i * 3 + 1] = 0.20 + Math.random() * 0.2; // G
+      colors[i * 3 + 2] = 0.50 + Math.random() * 0.3; // B
       
-      sizes[i] = Math.random() * 2.0;
+      sizes[i] = 0.8 + Math.random() * 1.5;
     }
 
     const geo = new THREE.BufferGeometry();
@@ -276,6 +298,7 @@ export class World {
 
     const mat = new THREE.ShaderMaterial({
       uniforms: { u_time: { value: 0.0 } },
+      vertexColors: true, // Fixes Three.js shader compilation error
       vertexShader: `
         uniform float u_time;
         attribute float size;
@@ -283,7 +306,7 @@ export class World {
         void main() {
           vColor = color;
           vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = size * (300.0 / -mvPosition.z) * (0.5 + 0.5 * sin(u_time * 2.0 + position.x));
+          gl_PointSize = size * (200.0 / -mvPosition.z) * (0.6 + 0.4 * sin(u_time * 1.5 + position.x));
           gl_Position = projectionMatrix * mvPosition;
         }
       `,
@@ -292,8 +315,8 @@ export class World {
         void main() {
           float dist = length(gl_PointCoord - vec2(0.5));
           if (dist > 0.5) discard;
-          float alpha = (0.5 - dist) * 2.0;
-          gl_FragColor = vec4(vColor, alpha * 0.6);
+          float alpha = (0.5 - dist) * 1.6;
+          gl_FragColor = vec4(vColor * 0.8, alpha * 0.4);
         }
       `,
       transparent: true,
@@ -313,16 +336,8 @@ export class World {
 
   /**
    * Loads all buildings for a zone. For each model file listed in the zone
-   * config, it attempts a GLB load; on failure, a procedural placeholder is
-   * placed instead.
-   *
-   * @param {string} zoneId
-   * @returns {Promise<void>}
-   */
-  /**
-   * Loads all buildings for a zone. For each model file listed in the zone
-   * config, it attempts a GLB load if registered as available; otherwise, a procedural
-   * placeholder is placed instead.
+   * config, it attempts to load the real 3D model (GLTF or FBX); on failure,
+   * a procedural placeholder is placed instead.
    *
    * @param {string} zoneId
    * @returns {Promise<void>}
@@ -336,8 +351,8 @@ export class World {
     const [cx, cy, cz] = cfg.position;
     group.position.set(cx, cy, cz);
 
-    // Vast ethereal grid floor
-    const pedestalGeo = new THREE.PlaneGeometry(cfg.radius * 2.5, cfg.radius * 2.5, 64, 64);
+    // Ethereal dark grid floor with soft accent lines
+    const pedestalGeo = new THREE.PlaneGeometry(cfg.radius * 2.4, cfg.radius * 2.4, 32, 32);
     pedestalGeo.rotateX(-Math.PI / 2);
     const pedestalMat = this._makeFloorShaderMaterial(new THREE.Color(cfg.color_theme).getHex(), cfg.radius);
     const pedestalMesh = new THREE.Mesh(pedestalGeo, pedestalMat);
@@ -347,22 +362,24 @@ export class World {
     const placed = [];
 
     // Arrangement: spread buildings around the zone centre
-    const radiusFactor = zoneId === 'grand_reunion' ? 0.75 : 0.6;
+    const radiusFactor = zoneId === 'grand_reunion' ? 0.70 : 0.55;
     const slots = this._generateSlots(cfg.model_files.length, cfg.radius * radiusFactor);
+    const targetSizes = [24, 20, 16, 12, 10];
 
     for (let i = 0; i < cfg.model_files.length; i++) {
       const slot = slots[i];
       let obj = null;
       const modelFile = cfg.model_files[i];
 
-      if (this.availableModels.has(modelFile)) {
-        try {
-          obj = await this._loadGLB(modelFile);
-          obj.position.copy(slot.position);
-          obj.rotation.y = slot.rotation;
-        } catch (_) {
-          obj = null;
-        }
+      try {
+        console.log(`[World] Loading model: ${modelFile}`);
+        obj = await this._loadModel(modelFile);
+        const targetSize = targetSizes[i % targetSizes.length] || 16.0;
+        this._placeLoadedModel(obj, slot, targetSize);
+        console.log(`[World] Placed real 3D model: ${modelFile}`);
+      } catch (err) {
+        console.warn(`[World] Model load fallback for ${modelFile}:`, err);
+        obj = null;
       }
 
       if (!obj) {
@@ -374,10 +391,11 @@ export class World {
       placed.push(obj);
     }
 
-    // Zone-specific accent lighting
+    // Zone-specific subtle accent point light
     const accentColor = new THREE.Color(cfg.color_theme);
-    const pointLight  = new THREE.PointLight(accentColor, 1.5, cfg.radius * 1.5);
-    pointLight.position.set(0, 15, 0);
+    const pointLight  = new THREE.PointLight(accentColor, 0.8, cfg.radius * 0.8);
+    pointLight.decay  = 2.0;
+    pointLight.position.set(0, 12, 0);
     group.add(pointLight);
 
     this.scene.add(group);
@@ -400,29 +418,161 @@ export class World {
   }
 
   /**
-   * Attempts to load a GLB file.
+   * Robust model loader that supports both GLTF/GLB and Kaydara FBX formats.
+   * Normalizes textures, shadows, and materials.
    * @param {string} path
    * @returns {Promise<THREE.Group>}
    * @private
    */
-  _loadGLB(path) {
-    return new Promise((resolve, reject) => {
-      this.loader.load(
-        path,
-        gltf => {
-          const root = gltf.scene;
-          root.traverse(child => {
-            if (/** @type {any} */ (child).isMesh) {
-              child.castShadow    = true;
-              child.receiveShadow = true;
-            }
+  async _loadModel(path) {
+    const candidatePaths = [
+      path,
+      path.startsWith('models/') ? `assets/${path}` : `models/${path}`,
+      `../assets/${path}`,
+      path.startsWith('assets/') ? path.slice(7) : `assets/${path}`,
+      `/${path}`,
+      `/assets/${path}`,
+    ];
+
+    let lastError = null;
+
+    for (const candidate of candidatePaths) {
+      try {
+        const resp = await fetch(candidate);
+        if (!resp.ok) continue;
+        const arrayBuffer = await resp.arrayBuffer();
+
+        // Detect format from magic bytes
+        const header = new Uint8Array(arrayBuffer.slice(0, 16));
+        const isGLTF = header[0] === 0x67 && header[1] === 0x6C && header[2] === 0x54 && header[3] === 0x46; // 'glTF'
+        const magicStr = String.fromCharCode(...header.slice(0, 7));
+        const isFBX = magicStr === 'Kaydara';
+
+        if (isFBX) {
+          const group = this.fbxLoader.parse(arrayBuffer, candidate);
+          this._prepareModelMeshes(group);
+          return group;
+        }
+
+        if (isGLTF) {
+          return await new Promise((resolve, reject) => {
+            this.loader.parse(
+              arrayBuffer,
+              candidate,
+              gltf => {
+                this._prepareModelMeshes(gltf.scene);
+                resolve(gltf.scene);
+              },
+              err => reject(err)
+            );
           });
-          resolve(root);
-        },
-        undefined,
-        err => reject(err),
-      );
+        }
+
+        // Try GLTF first, then FBX fallback
+        try {
+          return await new Promise((resolve, reject) => {
+            this.loader.parse(
+              arrayBuffer,
+              candidate,
+              gltf => {
+                this._prepareModelMeshes(gltf.scene);
+                resolve(gltf.scene);
+              },
+              err => {
+                try {
+                  const group = this.fbxLoader.parse(arrayBuffer, candidate);
+                  this._prepareModelMeshes(group);
+                  resolve(group);
+                } catch (fbxErr) {
+                  reject(err || fbxErr);
+                }
+              }
+            );
+          });
+        } catch (_) {}
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    throw lastError || new Error(`Could not load model: ${path}`);
+  }
+
+  /**
+   * Prepares meshes inside a loaded 3D model for rendering.
+   * @param {THREE.Object3D} root
+   * @private
+   */
+  _prepareModelMeshes(root) {
+    root.traverse(child => {
+      if (/** @type {any} */ (child).isMesh) {
+        const mesh = /** @type {THREE.Mesh} */ (child);
+        mesh.castShadow    = true;
+        mesh.receiveShadow = true;
+        mesh.userData.isOriginalModel = true;
+
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        mats.forEach(mat => {
+          if (!mat) return;
+          mat.depthWrite = true;
+          mat.depthTest  = true;
+          mat.transparent = false;
+
+          // Convert Phong/Lambert to StandardMaterial for proper PBR lighting
+          if (mat.isMeshPhongMaterial || mat.isMeshLambertMaterial) {
+            const standardMat = new THREE.MeshStandardMaterial({
+              color: mat.color ? mat.color.clone() : new THREE.Color(0xb0a898),
+              map: mat.map || null,
+              roughness: 0.65,
+              metalness: 0.15,
+            });
+            mesh.material = standardMat;
+          } else if (mat.isMeshStandardMaterial) {
+            mat.roughness = Math.max(mat.roughness, 0.4);
+            mat.metalness = Math.min(mat.metalness, 0.4);
+          }
+        });
+      }
     });
+  }
+
+  /**
+   * Normalizes scale and grounds a model at the slot position.
+   * @param {THREE.Group|THREE.Object3D} obj
+   * @param {{ position: THREE.Vector3, rotation: number, scale: THREE.Vector3 }} slot
+   * @param {number} targetSize
+   * @private
+   */
+  _placeLoadedModel(obj, slot, targetSize = 16.0) {
+    // Reset transforms to measure raw bounding box
+    obj.position.set(0, 0, 0);
+    obj.rotation.set(0, 0, 0);
+    obj.scale.set(1, 1, 1);
+    obj.updateMatrixWorld(true);
+
+    const box = new THREE.Box3().setFromObject(obj);
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+
+    if (maxDim > 0.001) {
+      const fitScale = targetSize / maxDim;
+      const finalScale = fitScale * (slot.scale?.x || 1.0);
+      obj.scale.set(finalScale, finalScale, finalScale);
+      obj.updateMatrixWorld(true);
+
+      // Re-measure after scaling to ground the model at y = 0
+      const scaledBox = new THREE.Box3().setFromObject(obj);
+      obj.position.set(
+        slot.position.x,
+        slot.position.y - scaledBox.min.y,
+        slot.position.z
+      );
+    } else {
+      obj.position.copy(slot.position);
+    }
+
+    obj.rotation.y = slot.rotation;
+    obj.userData.isLoadedModel = true;
   }
 
   /**
@@ -585,21 +735,12 @@ export class World {
         varying vec3 v_normal;
         varying vec3 v_worldPosition;
 
-        float hash(vec3 p) {
-          return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
-        }
-
         void main() {
           v_position = position;
           v_normal   = normal;
-          
           vec4 worldPos = modelMatrix * vec4(position, 1.0);
           v_worldPosition = worldPos.xyz;
-
-          float noise = (hash(position + u_time * 0.3) - 0.5) * (1.0 - u_progress) * 0.15;
-          vec3  displaced = position + normal * noise;
-
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
       fragmentShader: `
@@ -614,26 +755,25 @@ export class World {
           vec3 viewDirection = normalize(cameraPosition - v_worldPosition);
           float fresnelTerm = dot(viewDirection, normalize(v_normal));
           fresnelTerm = clamp(1.0 - abs(fresnelTerm), 0.0, 1.0);
-          float fresnelGlow = pow(fresnelTerm, 2.0);
+          float fresnelGlow = pow(fresnelTerm, 2.5);
           
-          float scanline = sin(v_worldPosition.y * 3.0 - u_time * 2.0) * 0.5 + 0.5;
-          scanline = pow(scanline, 3.0);
+          float scanline = sin(v_worldPosition.y * 1.5 - u_time * 1.2) * 0.5 + 0.5;
 
-          float voidAlpha = fresnelGlow * 0.8 + scanline * 0.3 + 0.1;
-          vec3 voidColor = u_color * (1.0 + fresnelGlow * 2.0 + scanline);
+          // Sophisticated dark obsidian with soft colored edge glow
+          vec3 baseStone = vec3(0.08, 0.07, 0.12);
+          vec3 edgeGlow  = u_color * 0.75;
+          vec3 voidColor = mix(baseStone, edgeGlow, fresnelGlow * 0.6 + scanline * 0.15);
           
-          vec3 solidColor = mix(vec3(0.08, 0.08, 0.12), vec3(0.9, 0.75, 0.3), fresnelGlow * 0.6 + 0.2);
-          float solidAlpha = 1.0;
-          
+          // Restored state: warm architectural stone
+          vec3 solidColor = mix(vec3(0.22, 0.20, 0.25), vec3(0.85, 0.75, 0.4), fresnelGlow * 0.4 + 0.1);
           vec3 finalColor = mix(voidColor, solidColor, u_progress);
-          float finalAlpha = mix(voidAlpha, solidAlpha, u_progress);
           
-          gl_FragColor = vec4(finalColor, min(finalAlpha, 1.0));
+          gl_FragColor = vec4(finalColor, 1.0);
         }
       `,
-      transparent:   true,
+      transparent:   false,
       side:          THREE.DoubleSide,
-      depthWrite:    false,
+      depthWrite:    true,
     });
 
     this._animatedMaterials.push(mat);
@@ -652,38 +792,42 @@ export class World {
       vertexShader: `
         uniform float u_time;
         uniform float u_progress;
-        varying vec3 v_position;
+        varying vec2 v_localPos;
 
         void main() {
-          v_position = position;
-          vec3 pos = position;
-          pos.z += sin(pos.x * 0.1 + u_time * 0.5) * 2.0 * (1.0 - u_progress);
-          pos.y += cos(pos.x * 0.1 + u_time * 0.5) * 1.5 * (1.0 - u_progress);
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+          // PlaneGeometry has rotateX(-PI/2), so ground coordinates are in X and Z
+          v_localPos = vec2(position.x, position.z);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
       fragmentShader: `
         uniform vec3  u_color;
         uniform float u_progress;
         uniform float u_radius;
-        varying vec3  v_position;
+        varying vec2  v_localPos;
 
         void main() {
-          float dist = length(v_position.xy);
-          float fade = 1.0 - smoothstep(u_radius * 0.4, u_radius * 1.2, dist);
+          float dist = length(v_localPos);
+          float fade = 1.0 - smoothstep(u_radius * 0.45, u_radius * 1.05, dist);
+          if (fade <= 0.001) discard;
 
-          vec2 grid = abs(fract(v_position.xy * 0.2) - 0.5);
-          float line = smoothstep(0.45, 0.5, max(grid.x, grid.y));
-          
-          float voidAlpha = line * fade * 0.5;
-          vec3 voidColor = u_color * 2.0;
+          // Subtle elegant grid pattern
+          vec2 grid = abs(fract(v_localPos * 0.15) - 0.5);
+          float line = smoothstep(0.46, 0.49, max(grid.x, grid.y));
 
-          float solidAlpha = fade * 0.8;
-          vec3 solidColor = mix(vec3(0.05, 0.05, 0.08), vec3(0.8, 0.7, 0.2), line * 0.2);
+          // Dark sleek void floor — never blinding
+          vec3 baseFloor = vec3(0.03, 0.02, 0.05);
+          vec3 gridGlow  = u_color * 0.55;
+          vec3 voidColor = mix(baseFloor, gridGlow, line * 0.4);
+
+          // Restored stone plaza with golden grid inlay
+          vec3 restoredBase = vec3(0.14, 0.13, 0.16);
+          vec3 restoredGrid = mix(vec3(0.85, 0.75, 0.35), u_color, 0.25);
+          vec3 solidColor = mix(restoredBase, restoredGrid, line * 0.45);
 
           vec3 finalColor = mix(voidColor, solidColor, u_progress);
-          float finalAlpha = mix(voidAlpha, solidAlpha, u_progress);
-          
+          float finalAlpha = fade * mix(0.8, 0.98, u_progress);
+
           gl_FragColor = vec4(finalColor, finalAlpha);
         }
       `,

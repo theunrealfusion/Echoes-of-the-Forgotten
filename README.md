@@ -204,3 +204,15 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 ---
 
 *Built with ❤️ for Tripothon S1 — September 2026*
+
+# Verify World Labs API connectivity
+python -m pipeline.batch_runner test-connection --provider worldlab
+
+# Verify Tripo API connectivity
+python -m pipeline.batch_runner test-connection --provider tripo
+
+# Generate a civilization pack with World Labs
+python -m pipeline.batch_runner generate-civ --civ sunken_library --provider worldlab
+
+# Generate all civilization packs with Tripo
+python -m pipeline.batch_runner generate-all --provider tripo

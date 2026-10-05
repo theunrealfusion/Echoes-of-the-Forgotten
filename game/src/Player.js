@@ -204,6 +204,19 @@ export class Player {
     return this.camera.position;
   }
 
+  /**
+   * Teleports player to a specific world position and resets velocity.
+   * @param {THREE.Vector3 | [number, number, number]} pos
+   */
+  setPosition(pos) {
+    if (Array.isArray(pos)) {
+      this.camera.position.set(pos[0], pos[1], pos[2]);
+    } else {
+      this.camera.position.copy(pos);
+    }
+    this.velocity.set(0, 0, 0);
+  }
+
   // ── Interaction raycast ───────────────────────────────────────────────────
 
   /**
@@ -258,9 +271,9 @@ export class Player {
   _onLockChange(locked) {
     const hint = document.getElementById('hint-text');
     if (!hint) return;
-    hint.textContent = locked
-      ? 'WASD to move • E to interact • ESC to release cursor'
-      : 'Click to explore the void';
+    hint.innerHTML = locked
+      ? 'WASD to move • Keys <kbd>1</kbd>-<kbd>4</kbd> switch zones • ESC to release cursor'
+      : 'Click to explore the void • Keys <kbd>1</kbd>-<kbd>4</kbd> switch zones';
   }
 
   // ── Mobile touch event wiring ─────────────────────────────────────────────

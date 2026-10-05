@@ -24,8 +24,12 @@ if str(_repo_root) not in sys.path:
 
 try:
     from .tripo_client import TripoClient, TripoAPIError, TripoTimeoutError
+    from .worldlabs_client import WorldLabsClient, WorldLabsAPIError, WorldLabsTimeoutError
+    from .config import get_active_provider, get_api_key, load_config
 except (ImportError, ValueError):
     from pipeline.tripo_client import TripoClient, TripoAPIError, TripoTimeoutError
+    from pipeline.worldlabs_client import WorldLabsClient, WorldLabsAPIError, WorldLabsTimeoutError
+    from pipeline.config import get_active_provider, get_api_key, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -385,14 +389,24 @@ class ForgottenCityAssetGenerator:
             Sub-folders are created per civilization and asset type.
     """
 
-    def __init__(self, api_key: str, output_dir: str = "assets/models") -> None:
-        self._api_key = api_key
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        output_dir: str = "assets/models",
+        provider: Optional[str] = None,
+    ) -> None:
+        self.provider = (provider or get_active_provider()).strip().lower()
+        self.config = load_config()
+        if api_key:
+            self._api_key = api_key
+        else:
+            self._api_key = get_api_key(self.provider)
         self.output_dir = Path(output_dir).expanduser().resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        # Client is instantiated fresh per major operation so that its session
-        # lifecycle is tightly scoped; callers may also pass a shared client
-        # via generate_* methods' optional ``client`` parameter in subclasses.
-        logger.info("ForgottenCityAssetGenerator initialised — output dir: %s", self.output_dir)
+        logger.info(
+            "ForgottenCityAssetGenerator initialised — provider: %s, output dir: %s",
+            self.provider, self.output_dir
+        )
 
     # ------------------------------------------------------------------
     # Civilization pack
@@ -409,33 +423,51 @@ class ForgottenCityAssetGenerator:
         limits): ``main_building``, ``secondary_building``, ``landmark``,
         ``artifact``, ``vegetation``, ``creature``.
 
-        Each asset goes through the full pipeline:
-        text-to-3D → retopology → PBR texturing.
+        Uses the active provider (Tripo3D or World Labs).
 
         Args:
             civ_name: Slug identifier for the civilization (e.g.
-                ``'sunken_library'``).  Used as the output sub-folder name.
+                ``'sunken_library'``). Used as the output sub-folder name.
             style_description: Full prose description of the civilization's
                 aesthetic, mixed into every generation prompt.
 
         Returns:
             A dict mapping each asset type key to the absolute path of the
-            saved ``.glb`` file, e.g.::
-
-                {
-                    "main_building": "/…/sunken_library/main_building.glb",
-                    "artifact": "/…/sunken_library/artifact.glb",
-                    …
-                }
-
-        Raises:
-            TripoAPIError: If any generation task fails.
-            TripoTimeoutError: If any task exceeds its timeout.
+            saved ``.glb`` file.
         """
-        logger.info("Generating civilization pack for: %s", civ_name)
+        logger.info("[%s] Generating civilization pack with provider: %s", civ_name, self.provider)
         prompts = self._get_civilization_prompts(civ_name, style_description)
         civ_dir = self.output_dir / civ_name
         civ_dir.mkdir(parents=True, exist_ok=True)
+
+        if self.provider == "worldlab":
+            w_cfg = self.config.get("worldlab", {})
+            base_url = w_cfg.get("base_url", "https://api.worldlabs.ai")
+            async with WorldLabsClient(self._api_key, base_url=base_url) as client:
+                tasks = {}
+                for asset_type, prompt_text in prompts.items():
+                    model_name = asset_type
+                    if civ_name in CIVILIZATION_ASSETS and asset_type in CIVILIZATION_ASSETS[civ_name]:
+                        model_name = CIVILIZATION_ASSETS[civ_name][asset_type]["name"]
+                    tasks[asset_type] = asyncio.create_task(
+                        self._generate_worldlab(
+                            client=client,
+                            name=model_name,
+                            prompt=prompt_text,
+                            output_path=str(civ_dir / f"{model_name}.glb"),
+                        )
+                    )
+
+                results: dict[str, str] = {}
+                for asset_type, task in tasks.items():
+                    try:
+                        path = await task
+                        results[asset_type] = path
+                        logger.info("[%s:WorldLabs] %s → %s", civ_name, asset_type, path)
+                    except (WorldLabsAPIError, WorldLabsTimeoutError, Exception) as exc:
+                        logger.error("[%s:WorldLabs] Failed to generate %s: %s", civ_name, asset_type, exc)
+                        results[asset_type] = f"ERROR: {exc}"
+                return results
 
         async with TripoClient(self._api_key) as client:
             tasks = {}
@@ -457,9 +489,9 @@ class ForgottenCityAssetGenerator:
                 try:
                     path = await task
                     results[asset_type] = path
-                    logger.info("[%s] %s → %s", civ_name, asset_type, path)
+                    logger.info("[%s:Tripo] %s → %s", civ_name, asset_type, path)
                 except (TripoAPIError, TripoTimeoutError, Exception) as exc:
-                    logger.error("[%s] Failed to generate %s: %s", civ_name, asset_type, exc)
+                    logger.error("[%s:Tripo] Failed to generate %s: %s", civ_name, asset_type, exc)
                     results[asset_type] = f"ERROR: {exc}"
 
         return results
@@ -492,6 +524,17 @@ class ForgottenCityAssetGenerator:
             TripoTimeoutError: If any step exceeds its timeout.
         """
         output_path = str(self.output_dir / "buildings" / f"{name}.glb")
+        if self.provider == "worldlab":
+            w_cfg = self.config.get("worldlab", {})
+            base_url = w_cfg.get("base_url", "https://api.worldlabs.ai")
+            async with WorldLabsClient(self._api_key, base_url=base_url) as client:
+                return await self._generate_worldlab(
+                    client=client,
+                    name=name,
+                    prompt=style,
+                    output_path=output_path,
+                )
+
         async with TripoClient(self._api_key) as client:
             return await self._generate_and_optimize(
                 client=client,
@@ -500,6 +543,40 @@ class ForgottenCityAssetGenerator:
                 output_path=output_path,
                 optimize=optimize,
             )
+
+    async def _generate_worldlab(
+        self,
+        client: WorldLabsClient,
+        name: str,
+        prompt: str,
+        output_path: str,
+    ) -> str:
+        """Internal helper for World Labs AI: text-to-3D → poll operation → download GLB.
+
+        Args:
+            client: Active WorldLabsClient instance.
+            name: Asset name for logging.
+            prompt: Generation prompt text.
+            output_path: Local GLB destination path.
+
+        Returns:
+            Absolute path to downloaded GLB file.
+        """
+        w_cfg = self.config.get("worldlab", {})
+        model = w_cfg.get("model", "marble-1.1")
+        mesh_type = w_cfg.get("mesh_type", "collider")
+        timeout = w_cfg.get("timeout_seconds", 900)
+
+        logger.info("[%s:WorldLabs] Step 1/2 — submitting generation prompt", name)
+        task = await client.text_to_3d(prompt=prompt, display_name=name, model=model)
+        op_id = task.get("operation_id")
+        if not op_id:
+            raise WorldLabsAPIError(status=500, message=f"No operation_id returned for {name}")
+
+        logger.info("[%s:WorldLabs] Step 2/2 — waiting for operation (%s)", name, op_id)
+        result = await client.wait_for_operation(op_id, timeout=timeout)
+
+        return await client.download_model(result, output_path, mesh_type=mesh_type)
 
     async def _generate_and_optimize(
         self,
@@ -554,24 +631,29 @@ class ForgottenCityAssetGenerator:
     ) -> str:
         """Convert a concept-art image into an optimized 3D game asset.
 
-        Pipeline: image-upload → image-to-3D → retopology → PBR → download.
-
         Args:
             name: Descriptive name used as the output filename stem.
             image_path: Local path to the PNG/JPEG concept image.
-            optimize: If True, run retopology and PBR texturing after
-                initial generation.
+            optimize: If True, run retopology and PBR texturing (Tripo).
 
         Returns:
             Absolute path to the saved ``.glb`` file.
-
-        Raises:
-            FileNotFoundError: If *image_path* does not exist.
-            TripoAPIError: If any pipeline step fails.
-            TripoTimeoutError: If any step exceeds its timeout.
         """
         output_path = str(self.output_dir / "concepts" / f"{name}.glb")
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+        if self.provider == "worldlab":
+            w_cfg = self.config.get("worldlab", {})
+            base_url = w_cfg.get("base_url", "https://api.worldlabs.ai")
+            model = w_cfg.get("model", "marble-1.1")
+            mesh_type = w_cfg.get("mesh_type", "collider")
+            timeout = w_cfg.get("timeout_seconds", 900)
+            async with WorldLabsClient(self._api_key, base_url=base_url) as client:
+                logger.info("[%s:WorldLabs] Submitting image-to-3D", name)
+                gen_task = await client.image_to_3d(image_path, display_name=name, model=model)
+                op_id = gen_task.get("operation_id")
+                result = await client.wait_for_operation(op_id, timeout=timeout)
+                return await client.download_model(result, output_path, mesh_type=mesh_type)
 
         async with TripoClient(self._api_key) as client:
             # Step 1 — image to 3D
@@ -698,19 +780,31 @@ class ForgottenCityAssetGenerator:
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
             async with semaphore:
-                async with TripoClient(self._api_key) as client:
-                    try:
-                        path = await self._generate_and_optimize(
-                            client=client,
-                            name=name,
-                            prompt=prompt,
-                            output_path=output_path,
-                            optimize=optimize,
-                        )
-                        results[index] = path
-                    except Exception as exc:
-                        logger.error("batch_generate[%d] '%s' failed: %s", index, name, exc)
-                        results[index] = f"ERROR: {exc}"
+                try:
+                    if self.provider == "worldlab":
+                        w_cfg = self.config.get("worldlab", {})
+                        base_url = w_cfg.get("base_url", "https://api.worldlabs.ai")
+                        async with WorldLabsClient(self._api_key, base_url=base_url) as client:
+                            path = await self._generate_worldlab(
+                                client=client,
+                                name=name,
+                                prompt=prompt,
+                                output_path=output_path,
+                            )
+                            results[index] = path
+                    else:
+                        async with TripoClient(self._api_key) as client:
+                            path = await self._generate_and_optimize(
+                                client=client,
+                                name=name,
+                                prompt=prompt,
+                                output_path=output_path,
+                                optimize=optimize,
+                            )
+                            results[index] = path
+                except Exception as exc:
+                    logger.error("batch_generate[%d] '%s' failed: %s", index, name, exc)
+                    results[index] = f"ERROR: {exc}"
 
         await asyncio.gather(*[_run(i, spec) for i, spec in enumerate(prompts)])
         return results  # type: ignore[return-value]
