@@ -13,6 +13,8 @@ venv/
 # Assets (generated - too large for git)
 assets/models/
 assets/exports/
+game/assets/
+game/models/
 
 # OS
 .DS_Store

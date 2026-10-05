@@ -22,25 +22,13 @@ import * as THREE from 'three';
 const VOID_VERT = /* glsl */`
   uniform float u_time;
   uniform float u_progress;
-  varying vec3  v_bary;    // barycentric coordinate for wireframe
   varying vec3  v_normal;
   varying vec3  v_position;
-
-  // Hash-based pseudo-noise
-  float hash3(vec3 p) {
-    return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
-  }
 
   void main() {
     v_normal   = normal;
     v_position = position;
-
-    // Void displacement: random jitter that decays with restoration progress
-    float noiseAmp = (1.0 - u_progress) * 0.25;
-    float n = (hash3(position + u_time * 0.15) - 0.5) * 2.0;
-    vec3 displaced = position + normal * n * noiseAmp;
-
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
 
@@ -67,27 +55,27 @@ const VOID_FRAG = /* glsl */`
   }
 
   void main() {
-    // Wireframe contribution (strong in void, fades with progress)
+    // Wireframe contribution
     float edge      = wireframeEdge(v_position);
-    float pulse     = 0.5 + 0.5 * sin(u_time * 2.5 + v_position.y * 0.8);
-    float wireAlpha = edge * pulse * (1.0 - u_progress);
+    float pulse     = 0.5 + 0.5 * sin(u_time * 2.0 + v_position.y * 0.5);
+    
+    // Void base stone with colored edge highlights
+    vec3 baseVoid   = vec3(0.09, 0.08, 0.13);
+    vec3 edgeCol    = u_voidColor * 0.7;
+    vec3 voidCol    = mix(baseVoid, edgeCol, edge * (0.4 + 0.3 * pulse));
 
-    // Void colour: glowing purple edges
-    vec3 voidCol    = u_voidColor * (0.6 + 0.4 * pulse);
-
-    // Restored colour: warm stone with slight normal-based shading
+    // Restored colour: warm architectural stone with directional lighting
     float nDotL     = max(dot(normalize(v_normal), vec3(0.3, 1.0, 0.5)), 0.0);
-    vec3  restCol   = u_restoreColor * (0.5 + 0.5 * nDotL);
+    vec3  restCol   = u_restoreColor * (0.6 + 0.4 * nDotL);
 
-    // Blend between void wireframe and solid restored
+    // Blend between void and restored
     vec3  finalCol  = mix(voidCol, restCol, u_progress);
-    float finalAlpha = mix(max(wireAlpha, 0.08), 1.0, u_progress);
 
-    // Slight golden shimmer during final transition
-    float shimmer  = smoothstep(0.85, 1.0, u_progress) * sin(u_time * 6.0 + v_position.x) * 0.15;
+    // Subtle golden highlight during final transition
+    float shimmer  = smoothstep(0.85, 1.0, u_progress) * sin(u_time * 4.0 + v_position.x) * 0.1;
     finalCol      += vec3(shimmer * 0.8, shimmer * 0.5, 0.0);
 
-    gl_FragColor = vec4(finalCol, finalAlpha);
+    gl_FragColor = vec4(finalCol, 1.0);
   }
 `;
 
@@ -132,9 +120,9 @@ export class RestorationSystem {
       },
       vertexShader:   VOID_VERT,
       fragmentShader: VOID_FRAG,
-      transparent:    true,
+      transparent:    false,
       side:           THREE.DoubleSide,
-      depthWrite:     false,
+      depthWrite:     true,
     });
   }
 
@@ -157,9 +145,7 @@ export class RestorationSystem {
   // ── Scene-wide application ────────────────────────────────────────────────
 
   /**
-   * Traverses every mesh in the scene (that doesn't already have a void
-   * shader) and replaces its material with a VoidMaterial.
-   * Stores original materials so restore() can blend toward them.
+   * Traverses meshes that are NOT real 3D models and gives them void shaders.
    *
    * @param {THREE.Scene} scene
    */
@@ -167,6 +153,10 @@ export class RestorationSystem {
     scene.traverse(node => {
       const mesh = /** @type {any} */ (node);
       if (!mesh.isMesh) return;
+      if (mesh.userData?.isOriginalModel) return; // Preserve real 3D models!
+      if (mesh.name?.startsWith('echo_trigger')) return; // Trigger spheres must remain invisible
+      if (mesh.userData?.collected !== undefined) return; // Echo orbs manage their own materials
+      if (mesh.material?.visible === false) return; // Keep invisible helper meshes invisible
       if (mesh.material?.isShaderMaterial) return; // already void
 
       // Preserve original material for colour reference

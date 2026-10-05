@@ -1,0 +1,18 @@
+{
+  "provider": "tripo",
+  "output_dir": "assets/models",
+  "tripo": {
+    "base_url": "https://openapi.tripo3d.ai/v3",
+    "model_version": "v3.1-20260211",
+    "retopology": true,
+    "target_faces": 5000,
+    "pbr": true
+  },
+  "worldlab": {
+    "base_url": "https://api.worldlabs.ai",
+    "model": "marble-1.1",
+    "mesh_type": "collider",
+    "export_format": "glb",
+    "timeout_seconds": 900
+  }
+}

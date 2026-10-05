@@ -83,6 +83,8 @@ try:
         get_all_prompts,
     )
     from pipeline.tripo_client import TripoAPIError, TripoClient, TripoTimeoutError
+    from pipeline.worldlabs_client import WorldLabsAPIError, WorldLabsClient, WorldLabsTimeoutError
+    from pipeline.config import get_active_provider, get_api_key, load_config
 except ImportError:
     from asset_generator import (
         CIVILIZATION_ASSETS,
@@ -91,6 +93,8 @@ except ImportError:
         get_all_prompts,
     )
     from tripo_client import TripoAPIError, TripoClient, TripoTimeoutError
+    from worldlabs_client import WorldLabsAPIError, WorldLabsClient, WorldLabsTimeoutError
+    from config import get_active_provider, get_api_key, load_config
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -145,12 +149,11 @@ def _print(msg: str) -> None:
 # API key loading
 # ---------------------------------------------------------------------------
 
-def _load_api_key() -> str:
-    """Resolve the Tripo API key.
+def _load_api_key(provider: Optional[str] = None) -> str:
+    """Resolve API key for the active or requested provider.
 
-    Resolution order:
-    1. ``TRIPO_API_KEY`` environment variable (already set).
-    2. ``TRIPO_API_KEY`` in ``.env`` file in the current working directory.
+    Args:
+        provider: 'tripo' or 'worldlab' (defaults to config/env).
 
     Returns:
         The API key string.
@@ -158,37 +161,16 @@ def _load_api_key() -> str:
     Raises:
         SystemExit: If no key is found.
     """
-    # Try environment first
-    key = os.environ.get("TRIPO_API_KEY", "")
-    if key:
-        return key
-
-    # Try .env file
-    if _HAS_DOTENV:
-        env_path = Path(".env")
-        if env_path.exists():
-            load_dotenv(dotenv_path=env_path)
-            key = os.environ.get("TRIPO_API_KEY", "")
-        else:
-            # Try parent directories up to project root
-            for parent in Path.cwd().parents:
-                candidate = parent / ".env"
-                if candidate.exists():
-                    load_dotenv(dotenv_path=candidate)
-                    key = os.environ.get("TRIPO_API_KEY", "")
-                    break
-
-    if not key:
+    prov = (provider or get_active_provider()).strip().lower()
+    try:
+        return get_api_key(prov)
+    except Exception as exc:
         _print(
-            "[bold red]Error:[/bold red] TRIPO_API_KEY not found.\n"
-            "Set it in your environment or in a .env file:\n"
-            "  TRIPO_API_KEY=your_key_here"
+            f"[bold red]Error:[/bold red] {exc}"
             if _HAS_RICH
-            else "Error: TRIPO_API_KEY not found. Set it in your environment or .env file."
+            else f"Error: {exc}"
         )
         sys.exit(1)
-
-    return key
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +182,7 @@ def _save_manifest(
     results: dict,
     command: str,
     elapsed: float,
+    provider: str = "tripo",
 ) -> str:
     """Write a ``manifest.json`` file summarising the generation run.
 
@@ -208,6 +191,7 @@ def _save_manifest(
         results: Dict of results from the generation run.
         command: CLI command that was executed.
         elapsed: Total wall-clock seconds for the run.
+        provider: Provider used for generation ('tripo' or 'worldlab').
 
     Returns:
         Absolute path to the written manifest file.
@@ -215,6 +199,7 @@ def _save_manifest(
     manifest = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "command": command,
+        "provider": provider,
         "elapsed_seconds": round(elapsed, 2),
         "output_dir": str(Path(output_dir).resolve()),
         "assets": results,
@@ -231,19 +216,63 @@ def _save_manifest(
 # Command implementations
 # ---------------------------------------------------------------------------
 
-async def cmd_test_connection(api_key: str, probe: bool = False) -> int:
-    """Verify API connectivity and authentication.
-
-    By default, checks account balance and active credits via GET /account/balance
-    (zero credit cost). If probe is True, also submits a lightweight generation request.
+async def cmd_test_connection(
+    api_key: str,
+    probe: bool = False,
+    provider: Optional[str] = None,
+) -> int:
+    """Verify API connectivity and authentication for Tripo or World Labs.
 
     Args:
-        api_key: Tripo API key to validate.
+        api_key: Provider API key to validate.
         probe: Whether to submit an actual test generation probe.
+        provider: 'tripo' or 'worldlab' (default: active provider).
 
     Returns:
         Exit code (0 = success, 1 = failure).
     """
+    active_prov = (provider or get_active_provider()).strip().lower()
+
+    if active_prov == "worldlab":
+        _print("\n[bold cyan]Testing World Labs API connection…[/bold cyan]" if _HAS_RICH else "Testing World Labs API connection…")
+        try:
+            cfg = load_config()
+            base_url = cfg.get("worldlab", {}).get("base_url", "https://api.worldlabs.ai")
+            async with WorldLabsClient(api_key, base_url=base_url) as client:
+                info = await client.test_connection()
+                _print(
+                    f"[green]✓ World Labs Connection & Authentication successful![/green]\n"
+                    f"  Base URL: [bold cyan]{info.get('base_url')}[/bold cyan] | Model: [bold cyan]{info.get('model')}[/bold cyan]"
+                    if _HAS_RICH
+                    else f"✓ World Labs Connection & Authentication successful!\n"
+                         f"  Base URL: {info.get('base_url')} | Model: {info.get('model')}"
+                )
+                if probe:
+                    _print("\n  Submitting lightweight World Labs probe generation...")
+                    task = await client.text_to_3d("a single smooth stone cube", display_name="connectivity_probe")
+                    op_id = task.get("operation_id", "?")
+                    _print(
+                        f"  [green]✓ Probe generation submitted.[/green] Operation ID: [dim]{op_id}[/dim]"
+                        if _HAS_RICH
+                        else f"  ✓ Probe generation submitted. Operation ID: {op_id}"
+                    )
+                return 0
+        except WorldLabsAPIError as exc:
+            _print(
+                f"[bold red]✗ World Labs API Error:[/bold red] {exc}"
+                if _HAS_RICH
+                else f"✗ World Labs API Error: {exc}"
+            )
+            return 1
+        except Exception as exc:
+            _print(
+                f"[bold red]✗ Unexpected error:[/bold red] {exc}"
+                if _HAS_RICH
+                else f"✗ Unexpected error: {exc}"
+            )
+            return 1
+
+    # Default to Tripo3D
     _print("\n[bold cyan]Testing Tripo API connection…[/bold cyan]" if _HAS_RICH else "Testing Tripo API connection…")
     try:
         async with TripoClient(api_key) as client:
@@ -316,12 +345,12 @@ async def cmd_generate_civ(
         return 1
 
     style_description = CIVILIZATION_STYLES[civ_name]
-    generator = ForgottenCityAssetGenerator(api_key=api_key, output_dir=output_dir)
+    generator = ForgottenCityAssetGenerator(api_key=api_key, output_dir=output_dir, provider=provider)
 
     _print(
-        f"\n[bold magenta]Generating civilization pack:[/bold magenta] [cyan]{civ_name}[/cyan]"
+        f"\n[bold magenta]Generating civilization pack ({generator.provider}):[/bold magenta] [cyan]{civ_name}[/cyan]"
         if _HAS_RICH
-        else f"\nGenerating civilization pack: {civ_name}"
+        else f"\nGenerating civilization pack ({generator.provider}): {civ_name}"
     )
     _print(f"  Style: {style_description[:100]}…" if len(style_description) > 100 else f"  Style: {style_description}")
 
@@ -340,7 +369,7 @@ async def cmd_generate_civ(
 
     # Print results table
     if _HAS_RICH:
-        table = Table(title=f"{civ_name} — Generation Results", show_lines=True)
+        table = Table(title=f"{civ_name} — Generation Results ({generator.provider})", show_lines=True)
         table.add_column("Asset Type", style="cyan", no_wrap=True)
         table.add_column("Path / Status", style="white")
         for asset_type, path in results.items():
@@ -351,7 +380,7 @@ async def cmd_generate_civ(
         for asset_type, path in results.items():
             print(f"  {asset_type}: {path}")
 
-    manifest_path = _save_manifest(output_dir, {civ_name: results}, "generate-civ", elapsed)
+    manifest_path = _save_manifest(output_dir, {civ_name: results}, "generate-civ", elapsed, provider=generator.provider)
     _print(
         f"\n[green]Done in {elapsed:.1f}s.[/green]  Manifest: [dim]{manifest_path}[/dim]"
         if _HAS_RICH
@@ -360,29 +389,36 @@ async def cmd_generate_civ(
     return 0
 
 
-async def cmd_generate_all(api_key: str, output_dir: str, max_workers: int = 2) -> int:
+async def cmd_generate_all(
+    api_key: str,
+    output_dir: str,
+    max_workers: int = 2,
+    provider: Optional[str] = None,
+) -> int:
     """Generate asset packs for all five civilizations concurrently.
 
     Concurrency is limited to *max_workers* civilization packs running
-    simultaneously to avoid exceeding Tripo's per-account rate limits.
+    simultaneously to avoid exceeding API per-account rate limits.
 
     Args:
-        api_key: Tripo API key.
+        api_key: Provider API key.
         output_dir: Root output directory.
         max_workers: Maximum simultaneously running civilization packs.
+        provider: 'tripo' or 'worldlab' (default: active provider).
 
     Returns:
         Exit code (0 = all succeeded, 1 = at least one failure).
     """
+    generator = ForgottenCityAssetGenerator(api_key=api_key, output_dir=output_dir, provider=provider)
     _print(
-        "\n[bold magenta]Generating ALL civilization packs[/bold magenta]"
+        f"\n[bold magenta]Generating ALL civilization packs ({generator.provider})[/bold magenta]"
         if _HAS_RICH
-        else "\nGenerating ALL civilization packs"
+        else f"\nGenerating ALL civilization packs ({generator.provider})"
     )
+    _print(f"  Provider:      {generator.provider}")
     _print(f"  Civilizations: {list(CIVILIZATION_STYLES.keys())}")
     _print(f"  Output dir:    {output_dir}")
 
-    generator = ForgottenCityAssetGenerator(api_key=api_key, output_dir=output_dir)
     semaphore = asyncio.Semaphore(max_workers)
     all_results: dict[str, dict] = {}
     any_error = False
@@ -446,7 +482,7 @@ async def cmd_generate_all(api_key: str, output_dir: str, max_workers: int = 2) 
         ])
 
     elapsed = time.monotonic() - t0
-    manifest_path = _save_manifest(output_dir, all_results, "generate-all", elapsed)
+    manifest_path = _save_manifest(output_dir, all_results, "generate-all", elapsed, provider=generator.provider)
 
     _print(
         f"\n[bold green]All done in {elapsed:.1f}s.[/bold green]  Manifest: [dim]{manifest_path}[/dim]"
@@ -675,6 +711,12 @@ examples:
         help="Root directory for generated model files (default: assets/models).",
     )
     parser.add_argument(
+        "--provider",
+        choices=["tripo", "worldlab"],
+        default=None,
+        help="3D model generator API provider ('tripo' or 'worldlab'). Defaults to config or MODEL_PROVIDER env var.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Validate all 25 asset prompts and print credit cost estimates without calling the API.",
@@ -697,12 +739,18 @@ examples:
     # test-connection
     test_conn_parser = subparsers.add_parser(
         "test-connection",
-        help="Verify TRIPO_API_KEY and API reachability (queries account balance).",
+        help="Verify API key and reachability for Tripo or World Labs.",
     )
     test_conn_parser.add_argument(
         "--probe",
         action="store_true",
-        help="Also submit a lightweight generation probe task (consumes credits).",
+        help="Also submit a lightweight generation probe task.",
+    )
+    test_conn_parser.add_argument(
+        "--provider",
+        choices=["tripo", "worldlab"],
+        default=None,
+        help="Override provider to test ('tripo' or 'worldlab').",
     )
 
     # generate-civ
@@ -721,6 +769,12 @@ examples:
         ),
     )
     gen_civ.add_argument(
+        "--provider",
+        choices=["tripo", "worldlab"],
+        default=None,
+        help="Override provider ('tripo' or 'worldlab').",
+    )
+    gen_civ.add_argument(
         "--dry-run",
         action="store_true",
         help="Perform dry run without calling API.",
@@ -737,6 +791,12 @@ examples:
         default=2,
         metavar="N",
         help="Max concurrent civilization packs (default: 2).",
+    )
+    gen_all.add_argument(
+        "--provider",
+        choices=["tripo", "worldlab"],
+        default=None,
+        help="Override provider ('tripo' or 'worldlab').",
     )
     gen_all.add_argument(
         "--dry-run",
@@ -778,18 +838,19 @@ def main() -> None:
         parser.print_help()
         sys.exit(1)
 
-    api_key = _load_api_key()
+    provider = getattr(args, "provider", None)
+    api_key = _load_api_key(provider)
 
     exit_code: int = 0
 
     if args.command == "test-connection":
         exit_code = asyncio.run(
-            cmd_test_connection(api_key, probe=getattr(args, "probe", False))
+            cmd_test_connection(api_key, probe=getattr(args, "probe", False), provider=provider)
         )
 
     elif args.command == "generate-civ":
         exit_code = asyncio.run(
-            cmd_generate_civ(api_key, civ_name=args.civ, output_dir=args.output_dir)
+            cmd_generate_civ(api_key, civ_name=args.civ, output_dir=args.output_dir, provider=provider)
         )
 
     elif args.command == "generate-all":
@@ -798,6 +859,7 @@ def main() -> None:
                 api_key,
                 output_dir=args.output_dir,
                 max_workers=args.max_workers,
+                provider=provider,
             )
         )
 
